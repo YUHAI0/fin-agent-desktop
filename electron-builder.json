@@ -9,6 +9,7 @@
   "files": [
     "out/**/*",
     "resources/**/*",
+    "!resources/python",
     "!**/*.map"
   ],
   "extraResources": [
@@ -35,6 +36,21 @@
     ],
     "artifactName": "${productName}-${version}-${arch}.${ext}",
     "requestedExecutionLevel": "asInvoker"
+  },
+  "mac": {
+    "target": "dmg",
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
+    "category": "public.app-category.finance"
+  },
+  "dmg": {
+    "icon": "resources/icon.icns"
+  },
+  "linux": {
+    "target": [
+      "AppImage",
+      "deb"
+    ],
+    "category": "Office"
   },
   "nsis": {
     "oneClick": false,

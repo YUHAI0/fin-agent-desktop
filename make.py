@@ -1,6 +1,6 @@
 """
 Fin-Agent Desktop 构建工具 (源代码打包方案)
-策略：直接打包 Python 源代码，不使用 PyInstaller
+策略：使用 PyInstaller 打包 Python 后端为独立可执行文件
 """
 import os
 import sys
@@ -118,11 +118,48 @@ def update_package_version():
         log(f"更新版本号失败: {e}", "WARN")
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Fin-Agent Desktop Build Tool")
+    parser.add_argument("--target", choices=["win", "mac", "linux", "all"], help="Build target (win, mac, linux, all)")
+    args = parser.parse_args()
+
     os.system("cls" if os.name == "nt" else "clear")
     print("="*60)
     print("  Fin-Agent Desktop 源代码打包工具")
     print("="*60)
     
+    # Determine targets
+    targets = []
+    if args.target:
+        if args.target == "all":
+            targets = ["win", "mac", "linux"]
+        else:
+            targets = [args.target]
+    else:
+        # Default to current OS
+        if sys.platform == "win32":
+            targets = ["win"]
+        elif sys.platform == "darwin":
+            targets = ["mac"]
+        else:
+            targets = ["linux"]
+            
+    log(f"构建目标: {', '.join(targets)}")
+
+    # Check for cross-compilation issues with PyInstaller
+    current_os = "win" if sys.platform == "win32" else "mac" if sys.platform == "darwin" else "linux"
+    for t in targets:
+        if t != current_os and t != "all": # "all" implies best effort or we might just be on CI
+             if t == "mac" and current_os == "win":
+                 log("警告: 在 Windows 上构建 macOS 包会导致 Python 后端不可用！", "WARN")
+                 log("      PyInstaller 无法跨平台构建 macOS 可执行文件。", "WARN")
+                 log("      生成的 macOS 应用将包含 Windows .exe 文件，无法在 Mac 上运行。", "WARN")
+                 print("      按 Enter 继续，或 Ctrl+C 取消...")
+                 try:
+                    input()
+                 except:
+                    sys.exit(0)
+
     # 0. 同步版本号
     update_package_version()
     
@@ -136,41 +173,79 @@ def main():
     prepare_resources()
     
     # 2. 准备 Python 资源
-    log("准备 Python 后端...")
+    log("构建 Python 后端 (PyInstaller)...")
     python_res = RESOURCES_DIR / "python"
+    
+    # 清理旧的 python 资源
+    if python_res.exists():
+        shutil.rmtree(python_res)
     python_res.mkdir(parents=True, exist_ok=True)
     
-    # 复制 api.py
-    shutil.copy2(PYTHON_DIR / "api.py", python_res / "api.py")
+    # 检查 PyInstaller
+    try:
+        subprocess.run([sys.executable, "-m", "PyInstaller", "--version"], check=True, capture_output=True)
+    except subprocess.CalledProcessError:
+        log("未找到 PyInstaller，正在安装...", "WARN")
+        run(f'"{sys.executable}" -m pip install pyinstaller')
+
+    # 确保项目依赖已安装
+    log("检查项目依赖...")
+    req_file = FIN_AGENT_DIR / "requirements.txt"
+    if req_file.exists():
+        run(f'"{sys.executable}" -m pip install -r "{req_file}"')
+    else:
+        log("未找到 requirements.txt，跳过依赖安装", "WARN")
+
+    # 定义 PyInstaller 输出目录
+    py_dist = DIST_DIR / "py_dist"
+    py_work = DIST_DIR / "py_work"
     
-    # 复制 fin_agent 包
-    shutil.copytree(FIN_AGENT_DIR / "fin_agent", python_res / "fin_agent", dirs_exist_ok=True)
+    # 构建命令
+    # 注意：我们需要把 fin-agent 目录加入 paths，这样 PyInstaller 才能找到 fin_agent 包
+    # api.py 位于 python/api.py
+    # fin_agent 包位于 python/fin-agent/fin_agent
+    # 所以我们要添加 python/fin-agent 到 paths
     
-    # 复制 requirements.txt
-    shutil.copy2(FIN_AGENT_DIR / "requirements.txt", python_res / "requirements.txt")
+    paths_arg = str(FIN_AGENT_DIR)
     
-    # 复制 .env（如果存在）
+    pyinstaller_cmd = [
+        sys.executable, "-m", "PyInstaller",
+        "--noconfirm",
+        "--onedir",
+        "--console",
+        "--clean",
+        "--name", "api",
+        "--paths", paths_arg,
+        "--hidden-import", "fin_agent",
+        "--distpath", str(py_dist),
+        "--workpath", str(py_work),
+        str(PYTHON_DIR / "api.py")
+    ]
+    
+    log(f"执行 PyInstaller...")
+    # 使用 subprocess.run 直接执行列表命令，避免 shell=True 的转义问题
+    result = subprocess.run(pyinstaller_cmd, cwd=PROJECT_ROOT)
+    
+    if result.returncode != 0:
+        log("PyInstaller 打包失败！", "ERROR")
+        sys.exit(1)
+        
+    # 复制生成的可执行文件目录到 resources/python/api
+    # PyInstaller 生成的结构是 dist/api/api.exe (以及其他依赖)
+    src_dir = py_dist / "api"
+    dest_dir = python_res / "api"
+    
+    log(f"复制构建产物: {src_dir} -> {dest_dir}")
+    shutil.copytree(src_dir, dest_dir)
+    
+    # 复制 .env（如果存在）到 api.exe 同级目录
     if (PYTHON_DIR / ".env").exists():
-        shutil.copy2(PYTHON_DIR / ".env", python_res / ".env")
-    
-    # 创建依赖安装脚本
-    install_deps_script = python_res / "install_deps.bat"
-    install_deps_script.write_text("""@echo off
-echo 正在安装依赖...
-pip install -r requirements.txt
-if errorlevel 1 (
-    echo 依赖安装失败
-    pause
-    exit /b 1
-)
-echo 依赖安装完成
-pause
-""", encoding="utf-8")
-    
+        shutil.copy2(PYTHON_DIR / ".env", dest_dir / ".env")
+        
     # 复制 VERSION
     shutil.copy2(PROJECT_ROOT / "VERSION", RESOURCES_DIR / "VERSION")
     
-    log("Python 后端准备完成", "SUCCESS")
+    log("Python 后端打包完成", "SUCCESS")
     
     # 3. 构建前端
     log("安装前端依赖...")
@@ -186,20 +261,27 @@ pause
     env["ELECTRON_MIRROR"] = "https://npmmirror.com/mirrors/electron/"
     env["ELECTRON_BUILDER_BINARIES_MIRROR"] = "https://npmmirror.com/mirrors/electron-builder-binaries/"
     
-    # 在 Windows 上运行 npm 命令
-    cmd = "npm run build:win"
-    log(f"执行: {cmd}")
-    result = subprocess.run(cmd, shell=True, cwd=PROJECT_ROOT, env=env)
-    
-    if result.returncode != 0:
-        log("Electron 打包失败", "ERROR")
-        print("\n" + "="*40)
-        print("可能的解决方案：")
-        print("1. 权限错误：请尝试【以管理员身份运行】")
-        print("2. 网络错误：已尝试设置镜像源，请检查网络连接")
-        print("3. 缓存损坏：尝试删除 %LOCALAPPDATA%\\electron-builder\\Cache 目录")
-        print("="*40 + "\n")
-        sys.exit(1)
+    for target in targets:
+        cmd_key = f"build:{target}"
+        # Check if script exists in package.json (optional but good)
+        cmd = f"npm run {cmd_key}"
+        log(f"正在构建 {target} 包: {cmd}")
+        
+        result = subprocess.run(cmd, shell=True, cwd=PROJECT_ROOT, env=env)
+        
+        if result.returncode != 0:
+            log(f"Electron {target} 打包失败", "ERROR")
+            if target == "win":
+                print("\n" + "="*40)
+                print("可能的解决方案：")
+                print("1. 权限错误：请尝试【以管理员身份运行】")
+                print("2. 网络错误：已尝试设置镜像源，请检查网络连接")
+                print("3. 缓存损坏：尝试删除 %LOCALAPPDATA%\\electron-builder\\Cache 目录")
+                print("="*40 + "\n")
+            if args.target == "all": # Continue if one fails? Maybe not.
+                sys.exit(1)
+            else:
+                sys.exit(1)
     
     # 完成
     log("\n" + "="*60, "SUCCESS")
@@ -207,7 +289,7 @@ pause
     log(f"  输出目录: {DIST_DIR}", "SUCCESS")
     log("="*60 + "\n", "SUCCESS")
     
-    if DIST_DIR.exists() and os.name == "nt":
+    if DIST_DIR.exists() and os.name == "nt" and "win" in targets:
         os.startfile(DIST_DIR)
 
 if __name__ == "__main__":

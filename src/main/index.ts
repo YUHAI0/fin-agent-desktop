@@ -137,28 +137,34 @@ async function startPythonServer() {
   // 先清理可能存在的僵尸进程
   await killProcessOnPort(5678)
   
-  const scriptPath = is.dev
-    ? join(__dirname, '../../python/api.py')
-    : join(process.resourcesPath, 'python/api.py')
-  
-  const pythonDir = is.dev
+  const pythonDist = is.dev
     ? join(__dirname, '../../python')
     : join(process.resourcesPath, 'python')
-  
+
+  const executableName = process.platform === 'win32' ? 'api.exe' : 'api'
+  const executable = is.dev
+    ? 'python'
+    : join(pythonDist, 'api', executableName)
+
+  const args = is.dev
+     ? ['-u', join(pythonDist, 'api.py')]
+     : []
+
   console.log(`[${is.dev ? 'Dev' : 'Prod'}] Starting Python server`)
-  console.log(`  Script: ${scriptPath}`)
-  console.log(`  WorkDir: ${pythonDir}`)
+  console.log(`  Executable: ${executable}`)
+  console.log(`  Args: ${args}`)
+  console.log(`  WorkDir: ${pythonDist}`)
   
   // 设置 PYTHONPATH 以确保能找到 fin_agent 模块
   const env = {
     ...process.env,
     PYTHONIOENCODING: 'utf-8',
-    PYTHONPATH: pythonDir
+    PYTHONPATH: pythonDist
   }
   
   // 统一使用 python 命令运行脚本 (with unbuffered mode)
-  pyProc = spawn('python', ['-u', scriptPath], {
-    cwd: pythonDir,
+  pyProc = spawn(executable, args, {
+    cwd: pythonDist,
     env: env,
     stdio: ['ignore', 'pipe', 'pipe']  // stdin ignored, stdout/stderr piped
   })
