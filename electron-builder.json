@@ -1,0 +1,55 @@
+{
+  "appId": "com.finagent.desktop",
+  "productName": "Fin-Agent",
+  "copyright": "Copyright \u00a9 2024",
+  "directories": {
+    "output": "dist",
+    "buildResources": "resources"
+  },
+  "files": [
+    "out/**/*",
+    "resources/**/*",
+    "!**/*.map"
+  ],
+  "extraResources": [
+    {
+      "from": "resources/python",
+      "to": "python",
+      "filter": [
+        "**/*"
+      ]
+    },
+    {
+      "from": "VERSION",
+      "to": "VERSION"
+    }
+  ],
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": [
+          "x64"
+        ]
+      }
+    ],
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
+    "requestedExecutionLevel": "asInvoker"
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "Fin-Agent",
+    "perMachine": false,
+    "allowElevation": true,
+    "installerIcon": "resources/icon.ico",
+    "uninstallerIcon": "resources/icon.ico",
+    "installerHeaderIcon": "resources/icon.ico",
+    "deleteAppDataOnUninstall": false,
+    "runAfterFinish": true,
+    "license": "LICENSE"
+  },
+  "publish": null
+}
