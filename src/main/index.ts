@@ -1,9 +1,10 @@
-import { app, BrowserWindow, globalShortcut, ipcMain, Tray, Menu, nativeImage } from 'electron'
+import { app, BrowserWindow, globalShortcut, ipcMain, Tray, Menu, nativeImage, Notification, shell } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { spawn, ChildProcess, exec, execSync } from 'child_process'
-import { readFileSync, existsSync, appendFileSync } from 'fs'
+import { readFileSync, existsSync, appendFileSync, createWriteStream, unlink } from 'fs'
 import * as http from 'http'
+import * as https from 'https'
 import { promisify, format } from 'util'
 
 const execPromise = promisify(exec)
@@ -446,6 +447,169 @@ function registerGlobalShortcut(shortcut: string) {
   }
 }
 
+function compareVersions(v1: string, v2: string): number {
+  const parts1 = v1.split('.').map(Number)
+  const parts2 = v2.split('.').map(Number)
+  for (let i = 0; i < Math.max(parts1.length, parts2.length); i++) {
+    const p1 = parts1[i] || 0
+    const p2 = parts2[i] || 0
+    if (p1 > p2) return 1
+    if (p1 < p2) return -1
+  }
+  return 0
+}
+
+function downloadFile(url: string, dest: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const file = createWriteStream(dest)
+    
+    const handleResponse = (response: http.IncomingMessage) => {
+      // Handle redirects
+      if (response.statusCode === 301 || response.statusCode === 302) {
+        if (response.headers.location) {
+          const redirectUrl = response.headers.location
+          console.log(`[Update] Redirecting to: ${redirectUrl}`)
+          https.get(redirectUrl, handleResponse).on('error', (err) => {
+            unlink(dest, () => {})
+            reject(err)
+          })
+          return
+        }
+      }
+
+      if (response.statusCode !== 200) {
+        unlink(dest, () => {})
+        reject(new Error(`Failed to download: ${response.statusCode}`))
+        return
+      }
+
+      response.pipe(file)
+      
+      file.on('finish', () => {
+        file.close()
+        resolve()
+      })
+
+      file.on('error', (err) => {
+        unlink(dest, () => {})
+        reject(err)
+      })
+    }
+
+    https.get(url, { headers: { 'User-Agent': 'fin-agent-desktop' } }, handleResponse)
+      .on('error', (err) => {
+        unlink(dest, () => {})
+        reject(err)
+      })
+  })
+}
+
+function checkForUpdates() {
+  console.log('[Update] Starting update check...')
+  const options = {
+    hostname: 'api.github.com',
+    path: '/repos/YUHAI0/fin-agent-desktop/releases/latest',
+    method: 'GET',
+    headers: {
+      'User-Agent': 'fin-agent-desktop'
+    }
+  }
+
+  const req = https.request(options, (res) => {
+    let data = ''
+    res.on('data', (chunk) => {
+      data += chunk
+    })
+
+    res.on('end', () => {
+      if (res.statusCode === 200) {
+        try {
+          const release = JSON.parse(data)
+          const latestVersion = release.tag_name.replace(/^v/, '')
+          const currentVersion = getVersion()
+
+          console.log(`[Update] Version check: current=${currentVersion}, latest=${latestVersion}`)
+
+          if (compareVersions(latestVersion, currentVersion) > 0) {
+            console.log(`[Update] New version found: ${latestVersion}`)
+            
+            // Determine asset extension based on platform
+            let assetExt = ''
+            if (process.platform === 'win32') {
+                assetExt = '.exe'
+            } else if (process.platform === 'darwin') {
+                assetExt = '.dmg'
+            }
+            
+            // Find asset
+            const asset = release.assets.find((a: any) => a.name.endsWith(assetExt))
+            if (asset && asset.browser_download_url) {
+                console.log(`[Update] Found update asset: ${asset.name}`)
+                const tempPath = join(app.getPath('temp'), asset.name)
+                
+                // Show a gentle notification or log that download is starting?
+                // For now, silent background download as requested
+                console.log(`[Update] Starting download from ${asset.browser_download_url} to ${tempPath}`)
+                
+                downloadFile(asset.browser_download_url, tempPath)
+                  .then(() => {
+                    console.log('[Update] Download complete')
+                    const notification = new Notification({
+                      title: '新版本就绪',
+                      body: `新版本 ${release.tag_name} 已下载完毕，点击此处立即安装更新。`,
+                      silent: false
+                    })
+
+                    notification.on('click', () => {
+                        console.log('[Update] User clicked notification. Spawning installer and quitting...')
+                        
+                        if (process.platform === 'darwin') {
+                            // macOS: Mount DMG and instruct user (simple way) or just open it
+                            // Opening DMG usually mounts it. Automating install from DMG is complex without Sparkle.
+                            // For this simple implementation, we just open the DMG file so user can drag-drop.
+                            shell.openPath(tempPath)
+                            // On macOS we might not want to quit immediately if we just open the DMG window,
+                            // but usually "updating" implies replacing the app. 
+                            // Standard behavior without auto-updater framework: Open DMG, user drags to App folder.
+                            // We can just exit to let them overwrite? 
+                            // Actually, if the app is running, they can't overwrite it easily.
+                            // Let's just open it and NOT quit automatically on Mac, 
+                            // or quit so they can drag-drop. Quitting is safer for overwrite.
+                            app.quit()
+                        } else {
+                            // Windows
+                            const subprocess = spawn(tempPath, [], {
+                                detached: true,
+                                stdio: 'ignore'
+                            })
+                            subprocess.unref()
+                            app.quit()
+                        }
+                    })
+
+                    notification.show()
+                  })
+                  .catch(err => {
+                    console.error('[Update] Download failed:', err)
+                  })
+            } else {
+                console.log(`[Update] No suitable asset found for platform ${process.platform}`)
+            }
+          }
+        } catch (e) {
+          console.error('[Update] Failed to parse release info', e)
+        }
+      }
+    })
+  })
+
+  req.on('error', (e) => {
+    console.error('[Update] Check failed', e)
+  })
+
+  req.end()
+}
+
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('fin-agent')
 
@@ -503,6 +667,11 @@ app.whenReady().then(() => {
   
   // Start checking slightly after startup to let Python init
   setTimeout(checkConfigLoop, 1000)
+
+  // Initial update check
+  checkForUpdates()
+  // Check updates every 4 hours
+  setInterval(checkForUpdates, 4 * 60 * 60 * 1000)
 
   // IPC handlers for config
   ipcMain.handle('suspend-shortcut', () => {

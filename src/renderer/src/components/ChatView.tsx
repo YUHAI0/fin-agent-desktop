@@ -134,7 +134,7 @@ const ChatView: React.FC = () => {
     const removeListener = window.api.onNewMessage((text) => {
       console.log('[ChatView] Received new-message:', text)
       if (text) {
-        setMessages(prev => [...prev, { role: 'user', content: text }])
+        setMessages(prev => [...prev, { role: 'user', content: text, blocks: [] }])
         setIsTyping(true)
         // Don't create assistant message yet - wait for first stream event
       }
