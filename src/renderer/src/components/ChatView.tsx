@@ -219,16 +219,51 @@ const ChatView: React.FC = () => {
             } else if (data.type === 'tool_call') {
                 const argsStr = typeof data.args === 'string' ? data.args : JSON.stringify(data.args)
                 
-                // Add new tool execution block
-                assistantMsg.blocks.push({ 
-                    type: 'tool_execution', 
-                    name: data.tool_name, 
-                    args: argsStr,
-                    status: 'running'
-                })
+                // Update existing block with final args if matched
+                const lastTool = getLastToolExecution()
+                if (lastTool && lastTool.status === 'running' && lastTool.name === data.tool_name) {
+                    lastTool.args = argsStr
+                } else {
+                    // Fallback create (shouldn't happen if stream worked, but safety first)
+                    assistantMsg.blocks.push({ 
+                        type: 'tool_execution', 
+                        name: data.tool_name, 
+                        args: argsStr,
+                        status: 'running'
+                    })
+                }
                 
                 // Also keep in logs for reference
                 assistantMsg.logs = (assistantMsg.logs || '') + `[Tool Call] ${data.tool_name}(${argsStr})\n`
+            } else if (data.type === 'tool_call_chunk') {
+                // Handle streaming tool call data
+                
+                // Try to find the active tool execution block
+                let lastTool = getLastToolExecution()
+                
+                // If we have a name, this might be the start of a tool call
+                if (data.name) {
+                    // If no active tool or the active tool is different/finished, create new
+                    if (!lastTool || lastTool.status !== 'running' || (lastTool.name && lastTool.name !== data.name)) {
+                         const newBlock: ToolExecutionBlock = { 
+                            type: 'tool_execution', 
+                            name: data.name, 
+                            args: '',
+                            status: 'running'
+                        }
+                        assistantMsg.blocks.push(newBlock)
+                        lastTool = newBlock
+                    } else if (!lastTool.name) {
+                        // We had a running block without name? Update it.
+                        lastTool.name = data.name
+                    }
+                }
+                
+                // Append arguments chunk
+                if (data.arguments && lastTool && lastTool.status === 'running') {
+                    lastTool.args += data.arguments
+                }
+                
             } else if (data.type === 'tool_result') {
                  // Truncate long results for display
                 const rawResult = data?.result == null ? '' : String(data.result)
