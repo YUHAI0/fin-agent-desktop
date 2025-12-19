@@ -1,5 +1,7 @@
 # Fin-Agent Desktop
 
+![Intro](resources/intro.gif)
+
 Fin-Agent Desktop 是一款基于 Electron + Python 的智能金融助手桌面应用。它集成了强大的 LLM 能力和专业的金融数据分析工具，为您提供自然流畅的金融咨询与分析服务。
 
 > 💡 **核心引擎**: 本项目基于 [Fin-Agent](https://github.com/YUHAI0/fin-agent) 核心构建。Fin-Agent 是一个基于 DeepSeek 等大模型和 Tushare 金融数据的智能金融分析代理，支持自然语言选股、策略回测、股价预警等功能。
