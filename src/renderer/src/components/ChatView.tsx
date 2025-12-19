@@ -161,17 +161,6 @@ const ChatView: React.FC = () => {
     setTimeout(() => inputRef.current?.focus(), 0)
   }
 
-  const handleClearChat = () => {
-    if (messages.length === 0) return
-    
-    if (confirm('确定要清空所有对话吗？')) {
-      console.log('[ChatView] Clearing chat history')
-      setMessages([])
-      setIsTyping(false)
-      // 通知主进程重置对话上下文状态
-      window.api.resetConversationContext()
-    }
-  }
 
   return (
     <div className="flex flex-col h-screen bg-gray-900 text-white drag-region">
@@ -186,15 +175,6 @@ const ChatView: React.FC = () => {
           >
             <Settings size={18} />
           </button>
-          {messages.length > 0 && (
-            <button
-              onClick={handleClearChat}
-              className="text-xs text-gray-400 hover:text-white transition-colors px-2 py-1 rounded hover:bg-gray-800"
-              title="清空对话"
-            >
-              清空
-            </button>
-          )}
           <div className="text-xs text-gray-500">v{version}</div>
         </div>
       </div>

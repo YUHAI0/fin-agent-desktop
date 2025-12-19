@@ -2,11 +2,49 @@ import { app, BrowserWindow, globalShortcut, ipcMain, Tray, Menu, nativeImage } 
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { spawn, ChildProcess, exec, execSync } from 'child_process'
-import { readFileSync } from 'fs'
+import { readFileSync, existsSync, appendFileSync } from 'fs'
 import * as http from 'http'
-import { promisify } from 'util'
+import { promisify, format } from 'util'
 
 const execPromise = promisify(exec)
+
+// Setup file logging
+function setupLogging() {
+  try {
+    const logPath = join(app.getPath('userData'), 'app.log')
+    // Clear old log on startup (optional, maybe user wants history? User said "append" implicitly by "write to", but usually logs are appended or rotated. "Clear" is safer for dev, but "Append" is better for history. I'll append.)
+    // Actually, maybe I should print a separator on startup.
+    
+    const logToFile = (message: string) => {
+      const timestamp = new Date().toISOString()
+      const logMessage = `[${timestamp}] ${message}\n`
+      try {
+        appendFileSync(logPath, logMessage)
+      } catch (err) {
+        // Fail silently
+      }
+    }
+
+    const originalLog = console.log
+    const originalError = console.error
+
+    console.log = (...args: any[]) => {
+      originalLog.apply(console, args)
+      logToFile(format(...args))
+    }
+
+    console.error = (...args: any[]) => {
+      originalError.apply(console, args)
+      logToFile('[ERROR] ' + format(...args))
+    }
+    
+    console.log('--- App Started ---')
+    console.log('Log file:', logPath)
+  } catch (err) {
+    console.error('Failed to setup logging:', err)
+  }
+}
+
 
 let inputWindow: BrowserWindow | null = null
 let chatWindow: BrowserWindow | null = null
@@ -89,9 +127,14 @@ async function killProcessOnPort(port: number): Promise<void> {
         console.log(`[Cleanup] Port ${port} is not in use`)
       }
     }
-  } catch (err) {
+  } catch (err: any) {
     // 如果命令执行失败，可能是因为没有进程占用端口
-    console.log(`[Cleanup] No process found on port ${port} or cleanup failed:`, err)
+    // Windows findstr 在找不到匹配项时会返回 exit code 1，这是正常的
+    if (err.message && err.message.includes('findstr') && err.code === 1) {
+       console.log(`[Cleanup] No process found on port ${port} (clean)`)
+    } else {
+       console.log(`[Cleanup] No process found on port ${port} or cleanup failed:`, err.message || err)
+    }
   }
 }
 
@@ -142,9 +185,22 @@ async function startPythonServer() {
     : join(process.resourcesPath, 'python')
 
   const executableName = process.platform === 'win32' ? 'api.exe' : 'api'
-  const executable = is.dev
-    ? 'python'
-    : join(pythonDist, 'api', executableName)
+  let executable = ''
+
+  if (is.dev) {
+    const venvPython = process.platform === 'win32'
+      ? join(__dirname, '../../build_venv/Scripts/python.exe')
+      : join(__dirname, '../../build_venv/bin/python')
+    
+    if (existsSync(venvPython)) {
+      executable = venvPython
+    } else {
+      console.warn('[Start] Virtual environment python not found, falling back to global python')
+      executable = 'python'
+    }
+  } else {
+    executable = join(pythonDist, 'api', executableName)
+  }
 
   const args = is.dev
      ? ['-u', join(pythonDist, 'api.py')]
@@ -391,11 +447,13 @@ function registerGlobalShortcut(shortcut: string) {
 }
 
 app.whenReady().then(() => {
-  electronApp.setAppUserModelId('com.quickchat')
+  electronApp.setAppUserModelId('fin-agent')
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
   })
+
+  setupLogging()
 
   startPythonServer()
   createInputWindow()
