@@ -673,6 +673,40 @@ app.whenReady().then(() => {
   // Check updates every 4 hours
   setInterval(checkForUpdates, 4 * 60 * 60 * 1000)
 
+  // Poll for desktop notifications from scheduler
+  const pollNotifications = async () => {
+    try {
+      const res = await makeApiRequest('/notifications/poll')
+      if (res && res.notifications && Array.isArray(res.notifications)) {
+        res.notifications.forEach((notif: { title: string; body: string }) => {
+          const notification = new Notification({
+            title: notif.title || 'Fin-Agent 提醒',
+            body: notif.body || '',
+            silent: false
+          })
+          
+          notification.on('click', () => {
+            // Show chat window when notification is clicked
+            if (chatWindow) {
+              if (chatWindow.isMinimized()) {
+                chatWindow.restore()
+              }
+              chatWindow.show()
+              chatWindow.focus()
+            }
+          })
+          
+          notification.show()
+        })
+      }
+    } catch (e) {
+      // API might not be ready yet, ignore errors
+    }
+  }
+  
+  // Poll for notifications every 2 seconds
+  setInterval(pollNotifications, 2000)
+
   // IPC handlers for config
   ipcMain.handle('suspend-shortcut', () => {
       console.log('[Main] Suspending global shortcut')

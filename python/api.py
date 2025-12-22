@@ -62,12 +62,17 @@ else:
 try:
     from fin_agent.agent.core import FinAgent
     from fin_agent.config import Config
+    from fin_agent.scheduler import TaskScheduler
 except ImportError as e:
     print(f"Error importing fin_agent: {e}", file=sys.stderr)
     sys.exit(1)
 
 # Initialize Agent
 agent = None
+
+# Notification queue for desktop notifications
+notification_queue = []
+notification_lock = threading.Lock()
 
 def init_agent():
     global agent
@@ -83,6 +88,17 @@ def init_agent():
         agent = FinAgent()
         debug_print("FinAgent instance created")
         print("Agent initialized successfully.")
+        
+        # Start backend scheduler
+        try:
+            scheduler = TaskScheduler()
+            scheduler.start()
+            debug_print("Background scheduler started.")
+            print("Background scheduler started.")
+        except Exception as e:
+            debug_print(f"Warning: Failed to start scheduler: {e}")
+            sys.stderr.write(f"Warning: Failed to start scheduler: {e}\n")
+            sys.stderr.flush()
     except Exception as e:
         import traceback
         error_msg = f"Error initializing agent: {e}\n{traceback.format_exc()}"
@@ -97,8 +113,10 @@ class RequestHandler(BaseHTTPRequestHandler):
     
     def log_message(self, format, *args):
         """Override to add more detailed logging."""
-        sys.stderr.write(f"[HTTP] {format % args}\n")
-        sys.stderr.flush()
+        # Skip logging for notification polling to reduce noise
+        if self.path != '/notifications/poll':
+            sys.stderr.write(f"[HTTP] {format % args}\n")
+            sys.stderr.flush()
     
     def log_error(self, format, *args):
         """Override to log errors to stderr."""
@@ -106,8 +124,6 @@ class RequestHandler(BaseHTTPRequestHandler):
         sys.stderr.flush()
     
     def __init__(self, *args, **kwargs):
-        sys.stderr.write(f"[HTTP] RequestHandler.__init__() called for {args[1]}\n")
-        sys.stderr.flush()
         try:
             BaseHTTPRequestHandler.__init__(self, *args, **kwargs)
         except Exception as e:
@@ -119,8 +135,6 @@ class RequestHandler(BaseHTTPRequestHandler):
     
     def handle(self):
         """Override handle to add error catching."""
-        sys.stderr.write(f"[HTTP] handle() called for connection from {self.client_address}\n")
-        sys.stderr.flush()
         try:
             BaseHTTPRequestHandler.handle(self)
         except Exception as e:
@@ -130,9 +144,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             sys.stderr.flush()
     
     def handle_one_request(self):
-        """Override to add logging."""
-        sys.stderr.write("[HTTP] handle_one_request() called\n")
-        sys.stderr.flush()
+        """Override to add error catching."""
         try:
             BaseHTTPRequestHandler.handle_one_request(self)
         except Exception as e:
@@ -144,7 +156,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.close_connection = True
     
     def do_GET(self):
-        debug_print(f"Received GET request: {self.path}")
+        # debug_print(f"Received GET request: {self.path}")
         if self.path == '/config':
             try:
                 Config.load()
@@ -175,6 +187,23 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(json.dumps({"error": str(e), "trace": traceback.format_exc()}).encode('utf-8'))
 
+        elif self.path == '/notifications/poll':
+            # Poll for pending notifications (used by Electron)
+            try:
+                with notification_lock:
+                    notifications = notification_queue.copy()
+                    notification_queue.clear()
+                
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"notifications": notifications}).encode('utf-8'))
+            except Exception as e:
+                import traceback
+                self.send_response(500)
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": str(e), "trace": traceback.format_exc()}).encode('utf-8'))
+        
         elif self.path == '/config/check':
             try:
                 # Use validate to check if configured
@@ -299,6 +328,46 @@ class RequestHandler(BaseHTTPRequestHandler):
                     except:
                         pass
     
+            elif self.path == '/notification':
+                # Handle desktop notification from scheduler
+                content_length = int(self.headers.get('Content-Length', 0))
+                if content_length == 0:
+                    self.send_response(400)
+                    self.end_headers()
+                    self.wfile.write(b"Missing Content-Length")
+                    return
+                
+                post_data = self.rfile.read(content_length)
+                try:
+                    data = json.loads(post_data.decode('utf-8'))
+                    title = data.get('title', 'Fin-Agent 提醒')
+                    body = data.get('body', '')
+                    
+                    # Add notification to queue
+                    with notification_lock:
+                        notification_queue.append({
+                            "title": title,
+                            "body": body,
+                            "timestamp": time.time()
+                        })
+                    
+                    debug_print(f"Desktop notification queued: {title} - {body}")
+                    
+                    # Send response
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"success": True}).encode('utf-8'))
+                except json.JSONDecodeError:
+                    self.send_response(400)
+                    self.end_headers()
+                    self.wfile.write(b"Invalid JSON")
+                except Exception as e:
+                    import traceback
+                    self.send_response(500)
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"error": str(e), "trace": traceback.format_exc()}).encode('utf-8'))
+            
             elif self.path == '/config/save':
                 content_length = int(self.headers.get('Content-Length', 0))
                 post_data = self.rfile.read(content_length)
@@ -422,11 +491,11 @@ def run(port=5678):
         
         def get_request(self):
             """Override to log incoming connections."""
-            sys.stderr.write(f"[Server] Calling accept() to get next connection...\n")
+            # sys.stderr.write(f"[Server] Calling accept() to get next connection...\n")
             sys.stderr.flush()
             try:
                 sock, addr = self.socket.accept()
-                sys.stderr.write(f"[Server] Accepted connection from {addr}\n")
+                # sys.stderr.write(f"[Server] Accepted connection from {addr}\n")
                 sys.stderr.flush()
                 return sock, addr
             except socket.timeout as e:
