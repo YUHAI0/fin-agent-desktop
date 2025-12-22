@@ -308,6 +308,10 @@ function createChatWindow(): void {
     }
   })
 
+  // 禁用 Alt 键显示菜单栏
+  chatWindow.setMenuBarVisibility(false)
+  chatWindow.setMenu(null)
+
   chatWindow.on('close', (e) => {
     e.preventDefault()
     chatWindow?.hide()
@@ -394,12 +398,26 @@ app.commandLine.appendSwitch('disk-cache-size', '0')
 
 // 切换主窗口显示状态
 function toggleMainWindow() {
+  // 检查是否在配置页面，如果是则不允许切换
+  if (chatWindow && chatWindow.isVisible()) {
+    const url = chatWindow.webContents.getURL()
+    // 检查 URL 中是否包含 #/config
+    if (url.includes('#/config') || url.includes('hash=config')) {
+      console.log('[Main] Currently in config page, ignoring shortcut')
+      return
+    }
+  }
+
   // 根据是否有对话上下文决定显示哪个窗口
   if (hasConversationContext) {
     // 有上下文，显示对话窗口
     if (chatWindow) {
       if (chatWindow.isVisible()) {
         chatWindow.hide()
+        // 隐藏聊天窗口时，也隐藏输入框
+        if (inputWindow) {
+          inputWindow.hide()
+        }
       } else {
         if (chatWindow.isMinimized()) {
           chatWindow.restore()
@@ -407,6 +425,10 @@ function toggleMainWindow() {
         chatWindow.show()
         chatWindow.focus()
         chatWindow.webContents.send('focus-input')
+        // 显示聊天窗口时，确保输入框隐藏
+        if (inputWindow) {
+          inputWindow.hide()
+        }
       }
     }
   } else {
@@ -414,6 +436,10 @@ function toggleMainWindow() {
     if (inputWindow) {
       if (inputWindow.isVisible()) {
         inputWindow.hide()
+        // 隐藏输入框时，也隐藏聊天窗口
+        if (chatWindow) {
+          chatWindow.hide()
+        }
       } else {
         if (inputWindow.isMinimized()) {
           inputWindow.restore()
@@ -421,6 +447,10 @@ function toggleMainWindow() {
         inputWindow.show()
         inputWindow.focus()
         inputWindow.webContents.send('focus-input')
+        // 显示输入框时，确保聊天窗口隐藏
+        if (chatWindow) {
+          chatWindow.hide()
+        }
       }
     }
   }
@@ -619,8 +649,14 @@ function checkForUpdates() {
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('fin-agent')
 
+  // 禁用应用菜单栏
+  Menu.setApplicationMenu(null)
+
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
+    // 确保所有新创建的窗口都禁用菜单栏
+    window.setMenuBarVisibility(false)
+    window.setMenu(null)
   })
 
   setupLogging()
