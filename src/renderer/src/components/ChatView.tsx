@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Settings, ChevronDown, ChevronRight, Check, Loader2, Terminal } from 'lucide-react'
 import { useChat, ChatBlock } from '../contexts/ChatContext'
+import ConfigAlertModal from './ConfigAlertModal'
 
 // ToolExecutionBlock type helper
 type ToolExecutionBlock = Extract<ChatBlock, { type: 'tool_execution' }>
@@ -112,6 +113,8 @@ const ChatView: React.FC = () => {
   const [isResponding, setIsResponding] = useState(false) // 跟踪AI是否正在响应
   const [version, setVersion] = useState('...')
   const [autoScroll, setAutoScroll] = useState(true)
+  const [showConfigAlert, setShowConfigAlert] = useState(false)
+  const [configAlertMessage, setConfigAlertMessage] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -390,9 +393,8 @@ const ChatView: React.FC = () => {
     try {
       const status = await window.api.checkConfig()
       if (!status.configured) {
-        if (confirm(`Configuration incomplete: ${status.message || 'Missing Tokens'}\n\nGo to settings?`)) {
-          navigate('/config')
-        }
+        setConfigAlertMessage(status.message || 'Missing required configuration tokens.')
+        setShowConfigAlert(true)
         return
       }
     } catch (err) {
@@ -541,6 +543,17 @@ const ChatView: React.FC = () => {
           </button>
         </form>
       </div>
+
+      {/* Config Alert Modal */}
+      <ConfigAlertModal
+        isOpen={showConfigAlert}
+        message={configAlertMessage}
+        onConfirm={() => {
+          setShowConfigAlert(false)
+          navigate('/config')
+        }}
+        onCancel={() => setShowConfigAlert(false)}
+      />
     </div>
   )
 }

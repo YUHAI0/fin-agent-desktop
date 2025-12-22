@@ -58,9 +58,8 @@ const InputView: React.FC = () => {
         try {
           const status = await window.api.checkConfig()
           if (!status.configured) {
-            if (confirm(`Configuration incomplete: ${status.message || 'Missing Tokens'}\n\nGo to settings?`)) {
-              window.api.openSettings()
-            }
+            // 快捷键输入框太小，直接跳转到配置页面
+            window.api.openSettings()
             return
           }
           window.api.submitInput(value)
