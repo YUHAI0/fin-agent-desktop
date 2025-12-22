@@ -17,3 +17,44 @@ body {
 .no-drag {
   -webkit-app-region: no-drag;
 }
+
+/* 表格样式优化 - 确保表格正确显示 */
+.prose table {
+  @apply w-full border-collapse my-4;
+  display: table !important;
+  table-layout: auto;
+  width: 100%;
+}
+
+.prose thead {
+  @apply bg-gray-800/50;
+  display: table-header-group !important;
+}
+
+.prose tbody {
+  display: table-row-group !important;
+}
+
+.prose th {
+  @apply border border-gray-700 px-4 py-2 text-left font-semibold text-gray-200;
+  white-space: nowrap;
+  display: table-cell !important;
+}
+
+.prose td {
+  @apply border border-gray-700 px-4 py-2 text-gray-300;
+  white-space: nowrap;
+  display: table-cell !important;
+}
+
+.prose tr {
+  display: table-row !important;
+}
+
+.prose tbody tr {
+  @apply hover:bg-gray-800/30 transition-colors;
+}
+
+.prose tbody tr:nth-child(even) {
+  @apply bg-gray-900/30;
+}
