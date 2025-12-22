@@ -3,6 +3,7 @@ import { Settings } from 'lucide-react'
 
 const InputView: React.FC = () => {
   const [value, setValue] = useState('')
+  const [isResponding, setIsResponding] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -14,13 +15,44 @@ const InputView: React.FC = () => {
             inputRef.current?.focus()
         }, 50)
     })
+    
+    // 监听AI响应状态
+    const removeBotStreamListener = window.api.onBotStream((data: any) => {
+        if (!data) return
+        
+        // 标记AI正在响应
+        setIsResponding(prev => {
+            if (!prev && (data.type === 'content' || data.type === 'answer' || data.type === 'thinking' || data.type === 'tool_call' || data.type === 'tool_call_chunk')) {
+                return true
+            }
+            if (data.type === 'error' || data.type === 'finish') {
+                return false // AI响应结束
+            }
+            return prev
+        })
+    })
+    
+    // 监听新消息，标记AI开始响应
+    const removeNewMessageListener = window.api.onNewMessage((text: string) => {
+        if (text) {
+            setIsResponding(true)
+        }
+    })
 
     return () => {
         removeFocusListener()
+        removeBotStreamListener()
+        removeNewMessageListener()
     }
   }, [])
 
   const handleKeyDown = async (e: React.KeyboardEvent) => {
+    // 如果AI正在响应，禁止回车提交
+    if (e.key === 'Enter' && isResponding) {
+      e.preventDefault()
+      return
+    }
+    
     if (e.key === 'Enter') {
       if (value.trim()) {
         try {
@@ -33,6 +65,7 @@ const InputView: React.FC = () => {
           }
           window.api.submitInput(value)
           setValue('')
+          setIsResponding(true) // 标记AI开始响应
         } catch (err) {
           console.error('Config check failed:', err)
           // Still try to submit if check fails, maybe network issue?
@@ -40,6 +73,7 @@ const InputView: React.FC = () => {
           // Probably better to submit so we don't block user on backend error.
           window.api.submitInput(value)
           setValue('')
+          setIsResponding(true) // 标记AI开始响应
         }
       }
     } else if (e.key === 'Escape') {
@@ -59,7 +93,7 @@ const InputView: React.FC = () => {
           ref={inputRef}
           type="text"
           className="w-full bg-transparent text-white text-2xl outline-none placeholder-gray-500 font-light h-full py-4"
-          placeholder="Ask anything..."
+          placeholder={isResponding ? "Agent is responding..." : "Ask anything..."}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}

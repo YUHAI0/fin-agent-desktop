@@ -3,22 +3,10 @@ import { useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Settings, ChevronDown, ChevronRight, Check, Loader2, Terminal } from 'lucide-react'
+import { useChat, ChatBlock } from '../contexts/ChatContext'
 
-interface ToolExecutionBlock {
-  type: 'tool_execution'
-  name: string
-  args: string
-  result?: string
-  status: 'running' | 'success' | 'error'
-  // Local UI state (not persisted in backend, but needed for toggle)
-  // We can't store UI state in the message block easily if we want it to persist across re-renders without external state map.
-  // For simplicity, we'll default to collapsed, and if we want to toggle, we might need a separate component or state.
-}
-
-type ChatBlock =
-  | { type: 'text'; content: string }
-  | { type: 'thinking'; content: string }
-  | ToolExecutionBlock
+// ToolExecutionBlock type helper
+type ToolExecutionBlock = Extract<ChatBlock, { type: 'tool_execution' }>
 
 // Component for rendering Tool Execution
 const ToolExecutionView: React.FC<{ block: ToolExecutionBlock }> = ({ block }) => {
@@ -78,18 +66,50 @@ const ToolExecutionView: React.FC<{ block: ToolExecutionBlock }> = ({ block }) =
   )
 }
 
-interface Message {
-  role: 'user' | 'assistant'
-  content: string // Kept for legacy compatibility
-  blocks: ChatBlock[]
-  logs?: string // Kept for legacy
+// Message interface is now imported from ChatContext
+
+// 表格组件配置，提取出来避免重复创建
+const markdownComponents = {
+  table: ({ children, ...props }: any) => (
+    <div className="overflow-x-auto my-4 -mx-4 px-4">
+      <table {...props} className="min-w-full border-collapse">
+        {children}
+      </table>
+    </div>
+  ),
+  thead: ({ children, ...props }: any) => (
+    <thead {...props} className="bg-gray-800/50">
+      {children}
+    </thead>
+  ),
+  tbody: ({ children, ...props }: any) => (
+    <tbody {...props}>
+      {children}
+    </tbody>
+  ),
+  th: ({ children, ...props }: any) => (
+    <th {...props} className="border border-gray-700 px-4 py-2 text-left font-semibold text-gray-200 whitespace-nowrap">
+      {children}
+    </th>
+  ),
+  td: ({ children, ...props }: any) => (
+    <td {...props} className="border border-gray-700 px-4 py-2 text-gray-300 whitespace-nowrap">
+      {children}
+    </td>
+  ),
+  tr: ({ children, ...props }: any) => (
+    <tr {...props} className="hover:bg-gray-800/30 transition-colors even:bg-gray-900/30">
+      {children}
+    </tr>
+  ),
 }
 
 const ChatView: React.FC = () => {
   const navigate = useNavigate()
-  const [messages, setMessages] = useState<Message[]>([])
+  const { messages, setMessages } = useChat() // 使用 Context 中的消息历史
   const [input, setInput] = useState('')
   const [isTyping, setIsTyping] = useState(false)
+  const [isResponding, setIsResponding] = useState(false) // 跟踪AI是否正在响应
   const [version, setVersion] = useState('...')
   const [autoScroll, setAutoScroll] = useState(true)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -136,6 +156,7 @@ const ChatView: React.FC = () => {
       if (text) {
         setMessages(prev => [...prev, { role: 'user', content: text, blocks: [] }])
         setIsTyping(true)
+        setIsResponding(true) // 用户发送消息后，AI开始响应
         // Don't create assistant message yet - wait for first stream event
       }
     })
@@ -145,6 +166,14 @@ const ChatView: React.FC = () => {
         
         console.log('[ChatView] Received bot-stream event:', data.type)
         
+        // 标记AI正在响应（使用函数式更新避免闭包问题）
+        setIsResponding(prev => {
+            if (!prev && (data.type === 'content' || data.type === 'answer' || data.type === 'thinking' || data.type === 'tool_call' || data.type === 'tool_call_chunk')) {
+                return true
+            }
+            return prev
+        })
+        
         // Hide typing indicator as soon as we receive any content from AI
         if (data.type === 'content' || data.type === 'answer') {
             console.log('[ChatView] Received content/answer, hiding typing indicator')
@@ -152,6 +181,7 @@ const ChatView: React.FC = () => {
         } else if (data.type === 'error' || data.type === 'finish') {
             console.log('[ChatView] Received error/finish, hiding typing indicator')
             setIsTyping(false)
+            setIsResponding(false) // AI响应结束
         }
         
         setMessages(prev => {
@@ -222,6 +252,7 @@ const ChatView: React.FC = () => {
                 // Update existing block with final args if matched
                 const lastTool = getLastToolExecution()
                 if (lastTool && lastTool.status === 'running' && lastTool.name === data.tool_name) {
+                    // Replace args with final version to avoid duplicates
                     lastTool.args = argsStr
                 } else {
                     // Fallback create (shouldn't happen if stream worked, but safety first)
@@ -249,19 +280,35 @@ const ChatView: React.FC = () => {
                             type: 'tool_execution', 
                             name: data.name, 
                             args: '',
-                            status: 'running'
+                            status: 'running',
+                            lastChunkLength: 0
                         }
                         assistantMsg.blocks.push(newBlock)
                         lastTool = newBlock
                     } else if (!lastTool.name) {
                         // We had a running block without name? Update it.
                         lastTool.name = data.name
+                        if (!lastTool.lastChunkLength) {
+                            lastTool.lastChunkLength = 0
+                        }
                     }
                 }
                 
-                // Append arguments chunk
+                // Append arguments chunk with duplicate detection
                 if (data.arguments && lastTool && lastTool.status === 'running') {
-                    lastTool.args += data.arguments
+                    const newArgs = data.arguments
+                    const currentArgs = lastTool.args
+                    
+                    // Check if this chunk would create duplicate content
+                    // If the new chunk is already at the end of current args, skip it
+                    if (newArgs && currentArgs.endsWith(newArgs)) {
+                        // This chunk is a duplicate, skip it
+                        return newMessages
+                    }
+                    
+                    // Normal case: append new chunk
+                    lastTool.args += newArgs
+                    lastTool.lastChunkLength = lastTool.args.length
                 }
                 
             } else if (data.type === 'tool_result') {
@@ -327,6 +374,13 @@ const ChatView: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     console.log('[ChatView] handleSubmit called, input:', input)
+    
+    // 如果AI正在响应，禁止提交
+    if (isResponding) {
+      console.log('[ChatView] AI is responding, submission blocked')
+      return
+    }
+    
     if (!input.trim()) {
       console.log('[ChatView] Input is empty, returning')
       return
@@ -350,12 +404,22 @@ const ChatView: React.FC = () => {
     // Send to main process
     window.api.submitInput(input)
     setInput('')
+    setIsResponding(true) // 标记AI开始响应
     // Keep focus on input after submit
     setTimeout(() => {
         inputRef.current?.focus()
         setAutoScroll(true) // Force auto scroll on new user message
         scrollToBottom()
     }, 0)
+  }
+  
+  // 处理输入框的键盘事件
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // 如果AI正在响应，禁止回车提交
+    if (e.key === 'Enter' && isResponding) {
+      e.preventDefault()
+      return
+    }
   }
 
 
@@ -412,7 +476,10 @@ const ChatView: React.FC = () => {
                     if (block.type === 'text') {
                       return (
                         <div key={bIdx} className="prose prose-invert prose-sm max-w-none">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          <ReactMarkdown 
+                            remarkPlugins={[remarkGfm]}
+                            components={markdownComponents}
+                          >
                             {block.content}
                           </ReactMarkdown>
                         </div>
@@ -424,7 +491,10 @@ const ChatView: React.FC = () => {
                   {/* Fallback for messages without blocks (legacy) */}
                   {(!msg.blocks || msg.blocks.length === 0) && msg.content && (
                      <div className="prose prose-invert prose-sm max-w-none">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        <ReactMarkdown 
+                          remarkPlugins={[remarkGfm]}
+                          components={markdownComponents}
+                        >
                           {msg.content}
                         </ReactMarkdown>
                      </div>
@@ -456,14 +526,15 @@ const ChatView: React.FC = () => {
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Type a message..."
+            onKeyDown={handleKeyDown}
+            placeholder={isResponding ? "Agent is responding..." : "Type a message..."}
             autoFocus
             className="flex-1 bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 transition-all"
           />
           <button 
             type="submit"
-            disabled={!input.trim() || isTyping}
-            onClick={() => console.log('[ChatView] Send button clicked, isTyping:', isTyping, 'input:', input)}
+            disabled={!input.trim() || isTyping || isResponding}
+            onClick={() => console.log('[ChatView] Send button clicked, isTyping:', isTyping, 'isResponding:', isResponding, 'input:', input)}
             className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl px-6 py-2 transition-colors font-medium"
           >
             Send
