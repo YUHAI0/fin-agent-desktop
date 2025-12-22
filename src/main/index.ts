@@ -563,28 +563,34 @@ function checkForUpdates() {
                     notification.on('click', () => {
                         console.log('[Update] User clicked notification. Spawning installer and quitting...')
                         
-                        if (process.platform === 'darwin') {
-                            // macOS: Mount DMG and instruct user (simple way) or just open it
-                            // Opening DMG usually mounts it. Automating install from DMG is complex without Sparkle.
-                            // For this simple implementation, we just open the DMG file so user can drag-drop.
-                            shell.openPath(tempPath)
-                            // On macOS we might not want to quit immediately if we just open the DMG window,
-                            // but usually "updating" implies replacing the app. 
-                            // Standard behavior without auto-updater framework: Open DMG, user drags to App folder.
-                            // We can just exit to let them overwrite? 
-                            // Actually, if the app is running, they can't overwrite it easily.
-                            // Let's just open it and NOT quit automatically on Mac, 
-                            // or quit so they can drag-drop. Quitting is safer for overwrite.
-                            app.quit()
-                        } else {
-                            // Windows
-                            const subprocess = spawn(tempPath, [], {
-                                detached: true,
-                                stdio: 'ignore'
-                            })
-                            subprocess.unref()
-                            app.quit()
-                        }
+                        // Kill Python process before installing update
+                        killPythonProcess()
+                        
+                        // Wait a bit for Python process to terminate
+                        setTimeout(() => {
+                            if (process.platform === 'darwin') {
+                                // macOS: Mount DMG and instruct user (simple way) or just open it
+                                // Opening DMG usually mounts it. Automating install from DMG is complex without Sparkle.
+                                // For this simple implementation, we just open the DMG file so user can drag-drop.
+                                shell.openPath(tempPath)
+                                // On macOS we might not want to quit immediately if we just open the DMG window,
+                                // but usually "updating" implies replacing the app. 
+                                // Standard behavior without auto-updater framework: Open DMG, user drags to App folder.
+                                // We can just exit to let them overwrite? 
+                                // Actually, if the app is running, they can't overwrite it easily.
+                                // Let's just open it and NOT quit automatically on Mac, 
+                                // or quit so they can drag-drop. Quitting is safer for overwrite.
+                                app.quit()
+                            } else {
+                                // Windows
+                                const subprocess = spawn(tempPath, [], {
+                                    detached: true,
+                                    stdio: 'ignore'
+                                })
+                                subprocess.unref()
+                                app.quit()
+                            }
+                        }, 500)
                     })
 
                     notification.show()
