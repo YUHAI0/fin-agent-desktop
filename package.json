@@ -1,6 +1,6 @@
 {
   "name": "fin-agent-desktop",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "A desktop financial agent Q&A tool",
   "main": "./out/main/index.js",
   "author": "example.com",
