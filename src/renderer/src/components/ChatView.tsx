@@ -4,7 +4,6 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Settings, ChevronDown, ChevronRight, Check, Loader2, Terminal } from 'lucide-react'
 import { useChat, ChatBlock } from '../contexts/ChatContext'
-import ConfigAlertModal from './ConfigAlertModal'
 
 // ToolExecutionBlock type helper
 type ToolExecutionBlock = Extract<ChatBlock, { type: 'tool_execution' }>
@@ -32,7 +31,7 @@ const ToolExecutionView: React.FC<{ block: ToolExecutionBlock }> = ({ block }) =
           )}
         </div>
         <div className="flex-1 font-mono text-xs text-gray-300 truncate flex items-center gap-2">
-          <span className="font-semibold text-blue-400">Ran {block.name}</span>
+          <span className="font-semibold text-blue-400">执行 {block.name}</span>
           <span className="text-gray-500 truncate opacity-50">{block.args.substring(0, 50)}</span>
         </div>
         <div className="text-gray-500">
@@ -43,7 +42,7 @@ const ToolExecutionView: React.FC<{ block: ToolExecutionBlock }> = ({ block }) =
       {isOpen && (
         <div className="border-t border-gray-700/50 bg-black/20 p-3 space-y-3 text-xs font-mono">
            <div>
-             <div className="text-gray-500 mb-1 uppercase text-[10px] tracking-wider font-semibold">Input</div>
+             <div className="text-gray-500 mb-1 uppercase text-[10px] tracking-wider font-semibold">输入</div>
              <div className="text-gray-300 break-all whitespace-pre-wrap bg-gray-900/50 p-2 rounded border border-gray-800">
                 {block.args}
              </div>
@@ -51,7 +50,7 @@ const ToolExecutionView: React.FC<{ block: ToolExecutionBlock }> = ({ block }) =
            
            {block.result && (
              <div>
-               <div className="text-gray-500 mb-1 uppercase text-[10px] tracking-wider font-semibold">Output</div>
+               <div className="text-gray-500 mb-1 uppercase text-[10px] tracking-wider font-semibold">输出</div>
                <div className="text-gray-300 break-all whitespace-pre-wrap bg-gray-900/50 p-2 rounded border border-gray-800 max-h-60 overflow-y-auto">
                   {block.result}
                </div>
@@ -59,7 +58,7 @@ const ToolExecutionView: React.FC<{ block: ToolExecutionBlock }> = ({ block }) =
            )}
            
            {block.status === 'running' && (
-              <div className="text-gray-500 italic">Running...</div>
+              <div className="text-gray-500 italic">运行中...</div>
            )}
         </div>
       )}
@@ -113,8 +112,6 @@ const ChatView: React.FC = () => {
   const [isResponding, setIsResponding] = useState(false) // 跟踪AI是否正在响应
   const [version, setVersion] = useState('...')
   const [autoScroll, setAutoScroll] = useState(true)
-  const [showConfigAlert, setShowConfigAlert] = useState(false)
-  const [configAlertMessage, setConfigAlertMessage] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -393,13 +390,15 @@ const ChatView: React.FC = () => {
     try {
       const status = await window.api.checkConfig()
       if (!status.configured) {
-        setConfigAlertMessage(status.message || 'Missing required configuration tokens.')
-        setShowConfigAlert(true)
+        console.log('[ChatView] Config not configured, redirecting to config page')
+        navigate('/config')
         return
       }
     } catch (err) {
       console.error('[ChatView] Config check failed:', err)
-      // If check fails, we might still want to try sending
+      // If check fails, assume not configured and redirect
+      navigate('/config')
+      return
     }
 
     console.log('[ChatView] Sending input to main process:', input)
@@ -434,7 +433,7 @@ const ChatView: React.FC = () => {
           <button
             onClick={() => navigate('/config')}
             className="text-gray-400 hover:text-white transition-colors p-1 rounded hover:bg-gray-800"
-            title="Settings"
+            title="设置"
           >
             <Settings size={18} />
           </button>
@@ -529,7 +528,7 @@ const ChatView: React.FC = () => {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={isResponding ? "Agent is responding..." : "Type a message..."}
+            placeholder={isResponding ? "Fin-Agent 正在回复..." : "输入消息..."}
             autoFocus
             className="flex-1 bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 transition-all"
           />
@@ -539,21 +538,10 @@ const ChatView: React.FC = () => {
             onClick={() => console.log('[ChatView] Send button clicked, isTyping:', isTyping, 'isResponding:', isResponding, 'input:', input)}
             className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl px-6 py-2 transition-colors font-medium"
           >
-            Send
+            发送
           </button>
         </form>
       </div>
-
-      {/* Config Alert Modal */}
-      <ConfigAlertModal
-        isOpen={showConfigAlert}
-        message={configAlertMessage}
-        onConfirm={() => {
-          setShowConfigAlert(false)
-          navigate('/config')
-        }}
-        onCancel={() => setShowConfigAlert(false)}
-      />
     </div>
   )
 }

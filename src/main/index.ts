@@ -666,6 +666,19 @@ app.whenReady().then(() => {
   createChatWindow()
   createTray()
 
+  // 启动时显示主界面（聊天窗口）
+  if (chatWindow) {
+    // 立即显示窗口，即使内容还在加载
+    chatWindow.show()
+    chatWindow.focus()
+    console.log('[Main] Main window displayed on startup')
+    
+    // 确保窗口在内容加载完成后获得焦点
+    chatWindow.webContents.once('did-finish-load', () => {
+      chatWindow?.focus()
+    })
+  }
+
   // Polling for API readiness and config check
   const checkConfigLoop = async () => {
     let attempts = 0
@@ -681,20 +694,9 @@ app.whenReady().then(() => {
 
         const res = await makeApiRequest('/config/check')
         if (res && res.configured === false) {
-          console.log('[Main] Config missing, redirecting to config page')
-          if (chatWindow) {
-            chatWindow.show()
-            chatWindow.focus()
-            // Navigate to config page
-            if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-              chatWindow.loadURL(`${process.env['ELECTRON_RENDERER_URL']}/#/config`)
-            } else {
-              chatWindow.loadFile(join(__dirname, '../renderer/index.html'), { hash: 'config' })
-            }
-          }
-          if (inputWindow) {
-            inputWindow.hide()
-          }
+          console.log('[Main] Config missing, but allowing user to see main interface first')
+          // 不再自动跳转，让用户首次运行时能看到主界面
+          // 配置检查将在用户尝试发送消息时进行
         } else {
           console.log('[Main] Config check passed')
         }
@@ -789,6 +791,10 @@ app.whenReady().then(() => {
     return await makeApiRequest('/config')
   })
 
+  ipcMain.handle('open-external', async (_, url: string) => {
+    shell.openExternal(url)
+  })
+
   ipcMain.handle('save-config', async (_, data) => {
     // Update shortcut immediately if present
     if (data.wake_up_shortcut) {
@@ -817,6 +823,31 @@ app.whenReady().then(() => {
 
   ipcMain.on('submit-input', async (_, text) => {
     console.log('[Main] Received submit-input:', text)
+    
+    // Check config before processing
+    try {
+      const configStatus = await makeApiRequest('/config/check')
+      if (!configStatus || !configStatus.configured) {
+        console.log('[Main] Config not configured, redirecting to config page')
+        if (inputWindow) inputWindow.hide()
+        if (chatWindow) {
+          chatWindow.show()
+          chatWindow.focus()
+          chatWindow.webContents.send('navigate-route', '/config')
+        }
+        return
+      }
+    } catch (err) {
+      console.error('[Main] Config check failed:', err)
+      // If check fails, assume not configured and redirect
+      if (inputWindow) inputWindow.hide()
+      if (chatWindow) {
+        chatWindow.show()
+        chatWindow.focus()
+        chatWindow.webContents.send('navigate-route', '/config')
+      }
+      return
+    }
     
     // 标记为有对话上下文
     hasConversationContext = true

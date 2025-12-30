@@ -25,7 +25,7 @@ const ConfigAlertModal: React.FC<ConfigAlertModalProps> = ({
             <div className="p-2 bg-yellow-500/20 rounded-lg">
               <AlertCircle className="w-5 h-5 text-yellow-500" />
             </div>
-            <h3 className="text-lg font-semibold text-white">Configuration Incomplete</h3>
+            <h3 className="text-lg font-semibold text-white">配置未完成</h3>
           </div>
           <button
             onClick={onCancel}
@@ -38,10 +38,10 @@ const ConfigAlertModal: React.FC<ConfigAlertModalProps> = ({
         {/* Content */}
         <div className="px-6 py-5">
           <p className="text-gray-300 leading-relaxed mb-1">
-            {message || 'Missing required configuration tokens.'}
+            {message || '缺少必需的配置令牌。'}
           </p>
           <p className="text-gray-400 text-sm mt-3">
-            Go to settings to configure?
+            前往设置进行配置？
           </p>
         </div>
 
@@ -51,14 +51,14 @@ const ConfigAlertModal: React.FC<ConfigAlertModalProps> = ({
             onClick={onCancel}
             className="px-4 py-2 text-gray-300 hover:text-white transition-colors rounded-lg hover:bg-gray-700 font-medium"
           >
-            Cancel
+            取消
           </button>
           <button
             onClick={onConfirm}
             className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium flex items-center gap-2"
           >
             <Settings className="w-4 h-4" />
-            Go to Settings
+            前往设置
           </button>
         </div>
       </div>

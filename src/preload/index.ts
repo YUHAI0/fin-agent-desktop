@@ -38,6 +38,7 @@ const api = {
   saveConfig: (data: any) => ipcRenderer.invoke('save-config', data),
   openSettings: () => ipcRenderer.send('open-settings'),
   resetConversationContext: () => ipcRenderer.send('reset-conversation-context'),
+  openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
   onNewMessage: (callback: (text: string) => void) => onNewMessageBridge(callback),
   onNavigate: (callback: (route: string) => void) => {
     ipcRenderer.on('navigate-route', (_event, route) => callback(route))

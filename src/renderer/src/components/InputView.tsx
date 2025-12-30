@@ -67,12 +67,9 @@ const InputView: React.FC = () => {
           setIsResponding(true) // 标记AI开始响应
         } catch (err) {
           console.error('Config check failed:', err)
-          // Still try to submit if check fails, maybe network issue?
-          // Or safeguard and block? Let's block to be safe or just submit.
-          // Probably better to submit so we don't block user on backend error.
-          window.api.submitInput(value)
-          setValue('')
-          setIsResponding(true) // 标记AI开始响应
+          // If config check fails, assume not configured and redirect to config page
+          window.api.openSettings()
+          return
         }
       }
     } else if (e.key === 'Escape') {
@@ -92,7 +89,7 @@ const InputView: React.FC = () => {
           ref={inputRef}
           type="text"
           className="w-full bg-transparent text-white text-2xl outline-none placeholder-gray-500 font-light h-full py-4"
-          placeholder={isResponding ? "Agent is responding..." : "Ask anything..."}
+          placeholder={isResponding ? "Fin-Agent 正在回复..." : "输入任何关于投资的问题..."}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -101,7 +98,7 @@ const InputView: React.FC = () => {
         <button
           onClick={() => window.api.openSettings()}
           className="text-gray-400 hover:text-white transition-colors p-2 rounded hover:bg-gray-800"
-          title="Settings"
+          title="设置"
         >
           <Settings size={20} />
         </button>

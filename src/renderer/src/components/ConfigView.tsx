@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, ExternalLink } from 'lucide-react'
 
 const ConfigView: React.FC = () => {
   const navigate = useNavigate()
@@ -78,10 +78,10 @@ const ConfigView: React.FC = () => {
         console.log('Config saved to:', result.path)
         navigate('/chat')
       } else {
-        setError(result.error || 'Failed to save configuration')
+        setError(result.error || '保存配置失败')
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to save configuration')
+      setError(err.message || '保存配置失败')
     } finally {
       setLoading(false)
     }
@@ -155,15 +155,15 @@ const ConfigView: React.FC = () => {
         <button
           onClick={() => navigate('/chat')}
           className="text-gray-400 hover:text-white transition-colors p-1 rounded hover:bg-gray-800 no-drag"
-          title="Back to Chat"
+          title="返回聊天"
         >
           <ArrowLeft size={20} />
         </button>
-        <div className="font-semibold text-lg">Configuration</div>
+        <div className="font-semibold text-lg">配置</div>
       </div>
 
       <div className="p-8 no-drag max-w-2xl mx-auto w-full">
-        <p className="mb-6 text-gray-400">Please configure the necessary API keys to continue.</p>
+        <p className="mb-6 text-gray-400">请配置必要的 API 密钥以继续使用。</p>
 
         {error && (
           <div className="mb-6 bg-red-900/50 border border-red-800 text-red-200 px-4 py-3 rounded-lg">
@@ -173,19 +173,30 @@ const ConfigView: React.FC = () => {
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="space-y-2">
-            <label className="block text-sm font-medium text-gray-300">Tushare Token</label>
+            <div className="flex items-center gap-2">
+              <label className="block text-sm font-medium text-gray-300">Tushare Token</label>
+              <button
+                type="button"
+                onClick={() => window.api.openExternal('https://tushare.pro/register')}
+                className="text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1 text-xs"
+                title="前往 Tushare 官网获取 Token"
+              >
+                <ExternalLink size={14} />
+                <span>获取 Token</span>
+              </button>
+            </div>
             <input
               type="text"
               value={tushareToken}
               onChange={(e) => setTushareToken(e.target.value)}
               className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
-              placeholder="Enter Tushare Token"
+              placeholder="输入 Tushare Token"
               required
             />
           </div>
 
           <div className="space-y-2">
-            <label className="block text-sm font-medium text-gray-300">LLM Provider</label>
+            <label className="block text-sm font-medium text-gray-300">LLM 提供商</label>
             <select
               value={provider}
               onChange={(e) => setProvider(e.target.value)}
@@ -199,7 +210,18 @@ const ConfigView: React.FC = () => {
           {provider === 'deepseek' ? (
             <div className="space-y-4 border-l-2 border-blue-600 pl-4">
               <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-300">DeepSeek API Key</label>
+                <div className="flex items-center gap-2">
+                  <label className="block text-sm font-medium text-gray-300">DeepSeek API Key</label>
+                  <button
+                    type="button"
+                    onClick={() => window.api.openExternal('https://platform.deepseek.com/api_keys')}
+                    className="text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1 text-xs"
+                    title="前往 DeepSeek 平台获取 API Key"
+                  >
+                    <ExternalLink size={14} />
+                    <span>获取 API Key</span>
+                  </button>
+                </div>
                 <input
                   type="password"
                   value={deepseekKey}
@@ -211,7 +233,7 @@ const ConfigView: React.FC = () => {
               </div>
               <div className="grid grid-cols-2 gap-4">
                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-gray-300">Base URL</label>
+                    <label className="block text-sm font-medium text-gray-300">基础 URL</label>
                     <input
                       type="text"
                       value={deepseekBase}
@@ -220,7 +242,7 @@ const ConfigView: React.FC = () => {
                     />
                  </div>
                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-gray-300">Model</label>
+                    <label className="block text-sm font-medium text-gray-300">模型</label>
                     <input
                       type="text"
                       value={deepseekModel}
@@ -233,7 +255,7 @@ const ConfigView: React.FC = () => {
           ) : (
             <div className="space-y-4 border-l-2 border-green-600 pl-4">
               <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-300">API Key</label>
+                <label className="block text-sm font-medium text-gray-300">API 密钥</label>
                 <input
                   type="password"
                   value={openaiKey}
@@ -245,23 +267,23 @@ const ConfigView: React.FC = () => {
               </div>
                <div className="grid grid-cols-2 gap-4">
                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-gray-300">Base URL</label>
+                    <label className="block text-sm font-medium text-gray-300">基础 URL</label>
                     <input
                       type="text"
                       value={openaiBase}
                       onChange={(e) => setOpenaiBase(e.target.value)}
                       className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
-                      placeholder="e.g. https://api.openai.com/v1"
+                      placeholder="例如：https://api.openai.com/v1"
                     />
                  </div>
                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-gray-300">Model</label>
+                    <label className="block text-sm font-medium text-gray-300">模型</label>
                     <input
                       type="text"
                       value={openaiModel}
                       onChange={(e) => setOpenaiModel(e.target.value)}
                       className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
-                      placeholder="e.g. gpt-4"
+                      placeholder="例如：gpt-4"
                     />
                  </div>
               </div>
@@ -269,9 +291,9 @@ const ConfigView: React.FC = () => {
           )}
 
           <div className="space-y-2 pt-6 border-t border-gray-800">
-             <h3 className="text-lg font-medium text-gray-200">System</h3>
+             <h3 className="text-lg font-medium text-gray-200">系统</h3>
              <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-300">Wake Up Shortcut</label>
+                <label className="block text-sm font-medium text-gray-300">唤醒快捷键</label>
                 <input
                   type="text"
                   value={wakeUpShortcut}
@@ -280,14 +302,18 @@ const ConfigView: React.FC = () => {
                   onFocus={handleShortcutFocus}
                   onBlur={handleShortcutBlur}
                   className={`w-full bg-gray-800 border ${shortcutStatus && !shortcutStatus.valid ? 'border-red-500' : 'border-gray-700'} rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer hover:bg-gray-750`}
-                  placeholder="Click here and press keys (e.g. Ctrl+Alt+Q)"
-                  title="Click to focus and type your shortcut"
+                  placeholder="点击此处并按下按键（例如：Ctrl+Alt+Q）"
+                  title="点击以聚焦并输入您的快捷键"
                 />
                 <div className="flex justify-between items-center text-xs">
-                    <p className="text-gray-500">Click input and press key combination. Backspace/Delete to clear.</p>
+                    <p className="text-gray-500">点击输入框并按下按键组合。Backspace/Delete 清除。</p>
                     {shortcutStatus && (
                         <span className={shortcutStatus.valid ? 'text-green-500' : 'text-red-400'}>
-                            {shortcutStatus.message}
+                            {shortcutStatus.message === 'Shortcut is already in use by another application' 
+                              ? '快捷键已被其他应用程序使用'
+                              : shortcutStatus.message === 'Shortcut available'
+                              ? '快捷键可用'
+                              : shortcutStatus.message}
                         </span>
                     )}
                 </div>
@@ -295,11 +321,11 @@ const ConfigView: React.FC = () => {
           </div>
 
           <div className="space-y-4 pt-6 border-t border-gray-800">
-            <h3 className="text-lg font-medium text-gray-200">Email Notifications (Optional)</h3>
+            <h3 className="text-lg font-medium text-gray-200">邮件通知（可选）</h3>
             
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-300">SMTP Server</label>
+                <label className="block text-sm font-medium text-gray-300">SMTP 服务器</label>
                 <input
                   type="text"
                   value={emailServer}
@@ -309,7 +335,7 @@ const ConfigView: React.FC = () => {
                 />
               </div>
               <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-300">SMTP Port</label>
+                <label className="block text-sm font-medium text-gray-300">SMTP 端口</label>
                 <input
                   type="text"
                   value={emailPort}
@@ -321,7 +347,7 @@ const ConfigView: React.FC = () => {
             </div>
 
             <div className="space-y-2">
-              <label className="block text-sm font-medium text-gray-300">Sender Email</label>
+              <label className="block text-sm font-medium text-gray-300">发件人邮箱</label>
               <input
                 type="email"
                 value={emailSender}
@@ -332,7 +358,7 @@ const ConfigView: React.FC = () => {
             </div>
 
             <div className="space-y-2">
-              <label className="block text-sm font-medium text-gray-300">Sender Password / App Password</label>
+              <label className="block text-sm font-medium text-gray-300">发件人密码 / 应用密码</label>
               <input
                 type="password"
                 value={emailPassword}
@@ -343,7 +369,7 @@ const ConfigView: React.FC = () => {
             </div>
 
             <div className="space-y-2">
-              <label className="block text-sm font-medium text-gray-300">Receiver Email (defaults to Sender)</label>
+              <label className="block text-sm font-medium text-gray-300">收件人邮箱（默认为发件人）</label>
               <input
                 type="email"
                 value={emailReceiver}
@@ -359,7 +385,7 @@ const ConfigView: React.FC = () => {
             disabled={loading}
             className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg px-6 py-3 font-medium transition-colors"
           >
-            {loading ? 'Saving...' : 'Save Configuration'}
+            {loading ? '保存中...' : '保存配置'}
           </button>
         </form>
       </div>

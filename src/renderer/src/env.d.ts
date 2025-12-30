@@ -29,6 +29,7 @@ declare interface Window {
     saveConfig: (data: ConfigData) => Promise<{ success: boolean; error?: string; path?: string }>
     openSettings: () => void
     resetConversationContext: () => void
+    openExternal: (url: string) => Promise<void>
     onFocusInput: (callback: () => void) => () => void
     onNavigate: (callback: (route: string) => void) => void
     suspendShortcut: () => Promise<void>
