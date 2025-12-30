@@ -4,6 +4,7 @@
 
 <div align="center">
 
+[![Website](https://img.shields.io/badge/Website-fin--agent.chat-blue?style=flat-square)](https://www.fin-agent.chat/)
 [![License](https://img.shields.io/github/license/YUHAI0/fin-agent-desktop.svg?style=flat-square)](https://github.com/YUHAI0/fin-agent-desktop/blob/main/LICENSE)
 [![Repo Size](https://img.shields.io/github/repo-size/YUHAI0/fin-agent-desktop.svg?style=flat-square)](https://github.com/YUHAI0/fin-agent-desktop)
 [![Last Commit](https://img.shields.io/github/last-commit/YUHAI0/fin-agent-desktop.svg?style=flat-square)](https://github.com/YUHAI0/fin-agent-desktop/commits/main)
