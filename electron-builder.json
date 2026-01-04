@@ -53,6 +53,7 @@
     "category": "Office"
   },
   "nsis": {
+    "include": "resources/installer.nsh",
     "oneClick": false,
     "allowToChangeInstallationDirectory": true,
     "createDesktopShortcut": true,

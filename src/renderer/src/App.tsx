@@ -2,10 +2,12 @@ import { Routes, Route, useNavigate } from 'react-router-dom'
 import InputView from './components/InputView'
 import ChatView from './components/ChatView'
 import ConfigView from './components/ConfigView'
-import { useEffect } from 'react'
+import QuitConfirmModal from './components/QuitConfirmModal'
+import { useEffect, useState } from 'react'
 
 function App(): JSX.Element {
   const navigate = useNavigate()
+  const [showQuitConfirm, setShowQuitConfirm] = useState(false)
 
   useEffect(() => {
     // Listen for navigation events from main process
@@ -15,15 +17,46 @@ function App(): JSX.Element {
         navigate(route)
       })
     }
+
+    // Listen for quit confirmation request from main process
+    if (window.api && window.api.onQuitConfirm) {
+      window.api.onQuitConfirm(() => {
+        console.log('[App] Received quit confirmation request')
+        setShowQuitConfirm(true)
+      })
+    }
   }, [navigate])
 
+  const handleQuitConfirm = () => {
+    console.log('[App] User confirmed quit')
+    setShowQuitConfirm(false)
+    if (window.api && window.api.quitConfirmed) {
+      window.api.quitConfirmed(true)
+    }
+  }
+
+  const handleQuitCancel = () => {
+    console.log('[App] User cancelled quit')
+    setShowQuitConfirm(false)
+    if (window.api && window.api.quitConfirmed) {
+      window.api.quitConfirmed(false)
+    }
+  }
+
   return (
-    <Routes>
-      <Route path="/input" element={<InputView />} />
-      <Route path="/chat" element={<ChatView />} />
-      <Route path="/config" element={<ConfigView />} />
-      <Route path="/" element={<InputView />} /> {/* Default to input if no hash */}
-    </Routes>
+    <>
+      <Routes>
+        <Route path="/input" element={<InputView />} />
+        <Route path="/chat" element={<ChatView />} />
+        <Route path="/config" element={<ConfigView />} />
+        <Route path="/" element={<InputView />} /> {/* Default to input if no hash */}
+      </Routes>
+      <QuitConfirmModal
+        isOpen={showQuitConfirm}
+        onConfirm={handleQuitConfirm}
+        onCancel={handleQuitCancel}
+      />
+    </>
   )
 }
 

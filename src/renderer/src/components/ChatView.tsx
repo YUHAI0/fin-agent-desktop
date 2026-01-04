@@ -375,9 +375,11 @@ const ChatView: React.FC = () => {
     e.preventDefault()
     console.log('[ChatView] handleSubmit called, input:', input)
     
-    // 如果AI正在响应，禁止提交
+    // 如果AI正在响应，点击按钮应该是停止生成
     if (isResponding) {
-      console.log('[ChatView] AI is responding, submission blocked')
+      console.log('[ChatView] Stopping generation...')
+      window.api.stopGeneration()
+      setIsResponding(false)
       return
     }
     
@@ -534,11 +536,15 @@ const ChatView: React.FC = () => {
           />
           <button 
             type="submit"
-            disabled={!input.trim() || isTyping || isResponding}
-            onClick={() => console.log('[ChatView] Send button clicked, isTyping:', isTyping, 'isResponding:', isResponding, 'input:', input)}
-            className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl px-6 py-2 transition-colors font-medium"
+            disabled={(!input.trim() && !isResponding) || isTyping}
+            onClick={() => console.log('[ChatView] Send/Stop button clicked, isTyping:', isTyping, 'isResponding:', isResponding, 'input:', input)}
+            className={`${
+              isResponding 
+                ? 'bg-red-600 hover:bg-red-700' 
+                : 'bg-blue-600 hover:bg-blue-700'
+            } disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl px-6 py-2 transition-colors font-medium`}
           >
-            发送
+            {isResponding ? '停止' : '发送'}
           </button>
         </form>
       </div>

@@ -19,6 +19,7 @@ interface ConfigData {
 declare interface Window {
   api: {
     submitInput: (text: string) => void
+    stopGeneration: () => void
     resizeInput: (height: number) => void
     getVersion: () => Promise<string>
     onNewMessage: (callback: (text: string) => void) => () => void
@@ -31,6 +32,9 @@ declare interface Window {
     resetConversationContext: () => void
     openExternal: (url: string) => Promise<void>
     onFocusInput: (callback: () => void) => () => void
+    onClearChatHistory: (callback: () => void) => () => void
+    onQuitConfirm: (callback: () => void) => () => void
+    quitConfirmed: (confirmed: boolean) => void
     onNavigate: (callback: (route: string) => void) => void
     suspendShortcut: () => Promise<void>
     resumeShortcut: () => Promise<void>

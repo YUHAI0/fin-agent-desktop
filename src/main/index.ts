@@ -52,6 +52,9 @@ let chatWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let pyProc: ChildProcess | null = null
 let hasConversationContext = false  // 跟踪是否有对话上下文
+let isCleaningUp = false  // 防止重复执行清理
+let currentRequest: http.ClientRequest | null = null  // 保存当前正在进行的 HTTP 请求
+let isUserStopped = false  // 标记是否是用户主动停止
 
 // Read version from VERSION file
 function getVersion(): string {
@@ -333,7 +336,102 @@ function createTray() {
   const contextMenu = Menu.buildFromTemplate([
     { label: '显示/隐藏', click: () => toggleMainWindow() },
     { type: 'separator' },
-    { label: '退出', click: () => {
+    { label: '退出', click: async () => {
+        // 检查是否有正在进行的生成
+        if (hasActiveGeneration()) {
+          // 再次检查，确保请求真的还在进行
+          if (!currentRequest) {
+            // 请求已经被清除，直接退出
+            console.log('[Main] Request already cleared, exiting directly from tray')
+            clearChatHistory()
+            if (chatWindow) {
+                chatWindow.destroy()
+                chatWindow = null
+            }
+            if (inputWindow) {
+                inputWindow.destroy()
+                inputWindow = null
+            }
+            app.quit()
+            return
+          }
+          
+          // 优先显示聊天窗口，隐藏输入窗口
+          if (chatWindow) {
+            if (!chatWindow.isVisible()) {
+              chatWindow.show()
+              chatWindow.focus()
+            }
+            // 隐藏输入窗口（如果可见）
+            if (inputWindow && inputWindow.isVisible()) {
+              inputWindow.hide()
+            }
+            
+            // 最后一次检查，确保请求还在进行
+            if (!currentRequest) {
+              // 请求已经被清除，直接退出
+              console.log('[Main] Request cleared before showing dialog from tray, exiting directly')
+              clearChatHistory()
+              if (chatWindow) {
+                  chatWindow.destroy()
+                  chatWindow = null
+              }
+              if (inputWindow) {
+                  inputWindow.destroy()
+                  inputWindow = null
+              }
+              app.quit()
+              return
+            }
+            
+            // 通过 IPC 请求渲染进程显示确认对话框
+            chatWindow.webContents.send('quit-confirm')
+            
+            // 等待用户响应
+            const confirmed = await new Promise<boolean>((resolve) => {
+              quitConfirmResolve = resolve
+              // 设置超时，如果 30 秒内没有响应，默认取消
+              setTimeout(() => {
+                if (quitConfirmResolve === resolve) {
+                  quitConfirmResolve = null
+                  resolve(false)
+                }
+              }, 30000)
+            })
+            
+            // 用户响应后，再次检查请求是否还在进行
+            if (!currentRequest) {
+              // 请求已经被清除，直接退出
+              console.log('[Main] Request cleared during dialog from tray, exiting directly')
+              clearChatHistory()
+              if (chatWindow) {
+                  chatWindow.destroy()
+                  chatWindow = null
+              }
+              if (inputWindow) {
+                  inputWindow.destroy()
+                  inputWindow = null
+              }
+              app.quit()
+              return
+            }
+            
+            if (!confirmed) {
+              // 用户选择取消，不退出
+              console.log('[Main] User cancelled quit from tray')
+              return
+            }
+            
+            // 用户选择继续退出，停止生成
+            await stopActiveGeneration()
+          } else {
+            // 没有聊天窗口，直接停止生成并退出
+            await stopActiveGeneration()
+          }
+        }
+        
+        // 清空聊天历史
+        clearChatHistory()
         // 销毁窗口以确保 app.quit 能正常工作
         if (chatWindow) {
             chatWindow.destroy()
@@ -408,27 +506,29 @@ function toggleMainWindow() {
     }
   }
 
-  // 根据是否有对话上下文决定显示哪个窗口
+  // 优先处理聊天窗口：如果聊天窗口可见，则关闭它
+  if (chatWindow && chatWindow.isVisible()) {
+    chatWindow.hide()
+    // 隐藏聊天窗口时，也隐藏输入框
+    if (inputWindow) {
+      inputWindow.hide()
+    }
+    return
+  }
+
+  // 如果聊天窗口不可见，根据是否有对话上下文决定显示哪个窗口
   if (hasConversationContext) {
     // 有上下文，显示对话窗口
     if (chatWindow) {
-      if (chatWindow.isVisible()) {
-        chatWindow.hide()
-        // 隐藏聊天窗口时，也隐藏输入框
-        if (inputWindow) {
-          inputWindow.hide()
-        }
-      } else {
-        if (chatWindow.isMinimized()) {
-          chatWindow.restore()
-        }
-        chatWindow.show()
-        chatWindow.focus()
-        chatWindow.webContents.send('focus-input')
-        // 显示聊天窗口时，确保输入框隐藏
-        if (inputWindow) {
-          inputWindow.hide()
-        }
+      if (chatWindow.isMinimized()) {
+        chatWindow.restore()
+      }
+      chatWindow.show()
+      chatWindow.focus()
+      chatWindow.webContents.send('focus-input')
+      // 显示聊天窗口时，确保输入框隐藏
+      if (inputWindow) {
+        inputWindow.hide()
       }
     }
   } else {
@@ -902,6 +1002,8 @@ app.whenReady().then(() => {
           const dataStr = dataLines.join('\n')
           if (dataStr === '[DONE]') {
             console.log('[Main] Received [DONE], sending finish event to renderer')
+            // 立即清除请求引用，因为生成已经完成
+            currentRequest = null
             if (chatWindow) {
               chatWindow.webContents.send('bot-stream', { type: 'finish' })
               console.log('[Main] Finish event sent to renderer')
@@ -925,6 +1027,7 @@ app.whenReady().then(() => {
 
           if (res.statusCode !== 200) {
             console.error('[Main] Non-200 status code received')
+            currentRequest = null  // 清除请求引用
             throw new Error(`HTTP error! status: ${res.statusCode}`)
           }
 
@@ -953,23 +1056,53 @@ app.whenReady().then(() => {
               flushEvent(buffer)
             }
             console.log('[Main] Response stream ended')
+            // 清除请求引用（如果还没有清除的话，可能在收到 [DONE] 时已经清除了）
+            if (currentRequest === req) {
+              currentRequest = null
+            }
+            isUserStopped = false  // 重置标志
           })
 
           res.on('error', (err) => {
-            console.error('[Main] Response stream error:', err)
-            if (chatWindow) {
-              chatWindow.webContents.send('bot-stream', { type: 'error', content: `Stream error: ${err.message}` })
+            currentRequest = null  // 清除请求引用
+            // 如果是用户主动停止，静默处理，不打印任何日志
+            if (!isUserStopped) {
+              console.error('[Main] Response stream error:', err)
+              if (chatWindow) {
+                chatWindow.webContents.send('bot-stream', { type: 'error', content: `Stream error: ${err.message}` })
+              }
             }
+            // 用户主动停止时，静默处理，不打印任何日志
+            isUserStopped = false  // 重置标志
           })
         })
+        
+        // 保存当前请求引用
+        currentRequest = req
 
-        req.on('error', (err) => {
-          console.error('[Main] Request error:', err)
-          console.error('[Main] Error code:', (err as any).code)
-          console.error('[Main] Error stack:', err.stack)
-          if (chatWindow) {
-            chatWindow.webContents.send('bot-stream', { type: 'error', content: `Request error: ${err.message}` })
+        req.on('error', (err: any) => {
+          currentRequest = null  // 清除请求引用
+          // ECONNRESET 和 EPIPE 是正常的，当进程关闭时连接会断开
+          if (err.code === 'ECONNRESET' || err.code === 'EPIPE') {
+            // 如果是用户主动停止，不打印日志
+            if (!isUserStopped) {
+              console.log('[Main] Request connection closed (process terminated)')
+            }
+          } else if (err.code === 'ECONNABORTED' || err.message === 'aborted' || err.message?.includes('aborted')) {
+            // 用户主动停止，不打印错误日志
+            // 静默处理，不打印任何日志
+          } else {
+            // 如果是用户主动停止，不显示错误
+            if (!isUserStopped) {
+              console.error('[Main] Request error:', err)
+              console.error('[Main] Error code:', err.code)
+              console.error('[Main] Error stack:', err.stack)
+              if (chatWindow) {
+                chatWindow.webContents.send('bot-stream', { type: 'error', content: `Request error: ${err.message}` })
+              }
+            }
           }
+          isUserStopped = false  // 重置标志
         })
         
         req.on('socket', (socket) => {
@@ -977,8 +1110,13 @@ app.whenReady().then(() => {
           socket.on('connect', () => {
             console.log('[Main] Socket connected')
           })
-          socket.on('error', (err) => {
-            console.error('[Main] Socket error:', err)
+          socket.on('error', (err: any) => {
+            // ECONNRESET 是正常的，当进程关闭时连接会断开
+            if (err.code === 'ECONNRESET' || err.code === 'EPIPE') {
+              console.log('[Main] Socket closed (process terminated)')
+            } else {
+              console.error('[Main] Socket error:', err)
+            }
           })
           socket.on('close', () => {
             console.log('[Main] Socket closed')
@@ -995,10 +1133,30 @@ app.whenReady().then(() => {
       } catch (err) {
         console.error('[Main] API Error:', err)
         console.error('[Main] Error stack:', (err as Error).stack)
+        currentRequest = null  // 清除请求引用
         if (chatWindow) {
           chatWindow.webContents.send('bot-stream', { type: 'error', content: `Error: ${err}` })
         }
       }
+    }
+  })
+  
+  // 停止生成处理器
+  ipcMain.on('stop-generation', () => {
+    console.log('[Main] Received stop-generation request')
+    if (currentRequest) {
+      console.log('[Main] Aborting current request...')
+      isUserStopped = true  // 标记为用户主动停止
+      currentRequest.destroy()  // 销毁请求，这会触发连接关闭
+      currentRequest = null
+      
+      // 通知前端生成已停止
+      if (chatWindow) {
+        chatWindow.webContents.send('bot-stream', { type: 'finish' })
+        console.log('[Main] Sent finish event to renderer after stop')
+      }
+    } else {
+      console.log('[Main] No active request to stop')
     }
   })
   
@@ -1027,37 +1185,59 @@ app.whenReady().then(() => {
   })
 })
 
+// 清空聊天历史
+function clearChatHistory() {
+  console.log('[Cleanup] Clearing chat history...')
+  const allWindows = BrowserWindow.getAllWindows()
+  allWindows.forEach(window => {
+    try {
+      window.webContents.send('clear-chat-history')
+      console.log('[Cleanup] Sent clear-chat-history to window')
+    } catch (err) {
+      console.error('[Cleanup] Failed to send clear-chat-history:', err)
+    }
+  })
+}
+
 // 终止 Python 进程的函数（带优雅关闭尝试）
 function killPythonProcess() {
+  // 防止重复执行清理
+  if (isCleaningUp) {
+    return
+  }
+  
   if (pyProc && pyProc.pid) {
+    isCleaningUp = true
     const pid = pyProc.pid  // 保存 PID，避免空值检查问题
     console.log('[Cleanup] Terminating Python process (PID:', pid, ')...')
     
     try {
       // 方法1: 先尝试发送 SIGTERM 让进程优雅退出
-      console.log('[Cleanup] Sending SIGTERM...')
       if (process.platform === 'win32') {
-        // Windows: 先尝试温和的终止
+        // Windows: 先尝试温和的终止（抑制错误输出）
         try {
-          execSync(`taskkill /pid ${pid} /t`, { timeout: 2000 })
+          execSync(`taskkill /pid ${pid} /t`, { 
+            timeout: 2000,
+            stdio: 'ignore'  // 抑制所有输出，包括错误信息
+          })
           console.log('[Cleanup] Python process terminated gracefully')
           pyProc = null
+          isCleaningUp = false
           return
         } catch (err) {
-          console.log('[Cleanup] Graceful termination failed, forcing...')
+          // 优雅终止失败，继续强制终止
         }
         
-        // 方法2: 强制终止
+        // 方法2: 强制终止（抑制错误输出）
         try {
-          execSync(`taskkill /pid ${pid} /f /t`, { timeout: 5000 })
-          console.log('[Cleanup] Python process terminated forcefully')
+          execSync(`taskkill /pid ${pid} /f /t`, { 
+            timeout: 5000,
+            stdio: 'ignore'  // 抑制所有输出
+          })
+          console.log('[Cleanup] Python process terminated')
         } catch (err: any) {
-          // 进程可能已经退出
-          if (err.status !== 128 && !err.message?.includes('not found')) {
-            console.log('[Cleanup] Process may have already exited:', err.message)
-          } else {
-            console.log('[Cleanup] Process terminated')
-          }
+          // 进程可能已经退出，这是正常的
+          console.log('[Cleanup] Process may have already exited')
         }
       } else {
         // macOS/Linux: 先 SIGTERM，再 SIGKILL
@@ -1082,23 +1262,142 @@ function killPythonProcess() {
     }
     
     pyProc = null
+    isCleaningUp = false
   } else {
     console.log('[Cleanup] No Python process to terminate')
   }
 }
 
+// 检查是否有正在进行的生成
+function hasActiveGeneration(): boolean {
+  return currentRequest !== null
+}
+
+// 停止当前正在进行的生成
+async function stopActiveGeneration(): Promise<void> {
+  if (currentRequest) {
+    console.log('[Main] Stopping active generation before quit...')
+    isUserStopped = true
+    currentRequest.destroy()
+    currentRequest = null
+    
+    // 通知前端生成已停止
+    if (chatWindow) {
+      chatWindow.webContents.send('bot-stream', { type: 'finish' })
+    }
+    
+    // 等待一小段时间确保请求已完全停止
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
+}
+
 app.on('window-all-closed', () => {
+  clearChatHistory()
   killPythonProcess()
   if (process.platform !== 'darwin') {
     app.quit()
   }
 })
 
-app.on('before-quit', () => {
-  killPythonProcess()
+// 等待用户确认退出的 Promise
+let quitConfirmResolve: ((confirmed: boolean) => void) | null = null
+
+app.on('before-quit', async (event) => {
+  // 检查是否有正在进行的生成
+  if (hasActiveGeneration()) {
+    // 再次检查，确保请求真的还在进行（防止竞态条件）
+    if (!currentRequest) {
+      // 请求已经被清除，直接退出
+      console.log('[Main] Request already cleared, exiting directly')
+      clearChatHistory()
+      killPythonProcess()
+      return
+    }
+    
+    // 阻止默认退出行为
+    event.preventDefault()
+    
+    // 优先显示聊天窗口，隐藏输入窗口
+    if (chatWindow) {
+      if (!chatWindow.isVisible()) {
+        chatWindow.show()
+        chatWindow.focus()
+      }
+      // 隐藏输入窗口（如果可见）
+      if (inputWindow && inputWindow.isVisible()) {
+        inputWindow.hide()
+      }
+      
+      // 最后一次检查，确保请求还在进行
+      if (!currentRequest) {
+        // 请求已经被清除，直接退出
+        console.log('[Main] Request cleared before showing dialog, exiting directly')
+        clearChatHistory()
+        killPythonProcess()
+        app.exit(0)
+        return
+      }
+      
+      // 通过 IPC 请求渲染进程显示确认对话框
+      chatWindow.webContents.send('quit-confirm')
+      
+      // 等待用户响应
+      const confirmed = await new Promise<boolean>((resolve) => {
+        quitConfirmResolve = resolve
+        // 设置超时，如果 30 秒内没有响应，默认取消
+        setTimeout(() => {
+          if (quitConfirmResolve === resolve) {
+            quitConfirmResolve = null
+            resolve(false)
+          }
+        }, 30000)
+      })
+      
+      // 用户响应后，再次检查请求是否还在进行
+      if (!currentRequest) {
+        // 请求已经被清除，直接退出
+        console.log('[Main] Request cleared during dialog, exiting directly')
+        clearChatHistory()
+        killPythonProcess()
+        app.exit(0)
+        return
+      }
+      
+      if (confirmed) {
+        // 用户选择继续退出，停止生成并退出
+        await stopActiveGeneration()
+        clearChatHistory()
+        killPythonProcess()
+        app.exit(0)
+      } else {
+        // 用户选择取消，不退出
+        console.log('[Main] User cancelled quit')
+      }
+    } else {
+      // 没有聊天窗口，直接退出
+      await stopActiveGeneration()
+      clearChatHistory()
+      killPythonProcess()
+      app.exit(0)
+    }
+  } else {
+    // 没有正在进行的生成，正常退出
+    clearChatHistory()
+    killPythonProcess()
+  }
+})
+
+// 处理用户确认退出的响应
+ipcMain.on('quit-confirmed', (_, confirmed: boolean) => {
+  console.log('[Main] Received quit confirmation response:', confirmed)
+  if (quitConfirmResolve) {
+    quitConfirmResolve(confirmed)
+    quitConfirmResolve = null
+  }
 })
 
 app.on('will-quit', () => {
+  clearChatHistory()
   killPythonProcess()
 })
 
@@ -1109,12 +1408,14 @@ process.on('exit', () => {
 
 process.on('SIGINT', () => {
   console.log('[Cleanup] Received SIGINT')
+  clearChatHistory()
   killPythonProcess()
   app.quit()
 })
 
 process.on('SIGTERM', () => {
   console.log('[Cleanup] Received SIGTERM')
+  clearChatHistory()
   killPythonProcess()
   app.quit()
 })

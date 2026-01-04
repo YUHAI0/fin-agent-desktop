@@ -48,6 +48,25 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   }, [])
 
+  // 监听程序退出时的清空聊天历史事件
+  useEffect(() => {
+    if (window.api && window.api.onClearChatHistory) {
+      const removeListener = window.api.onClearChatHistory(() => {
+        console.log('[ChatContext] Received clear-chat-history event')
+        setMessages([])
+        try {
+          localStorage.removeItem(STORAGE_KEY)
+          console.log('[ChatContext] Chat history cleared')
+        } catch (err) {
+          console.error('[ChatContext] Failed to clear chat history:', err)
+        }
+      })
+      return removeListener
+    }
+    // 如果条件不满足，返回 undefined（清理函数可选）
+    return undefined
+  }, [])
+
   // 保存到 localStorage
   useEffect(() => {
     try {

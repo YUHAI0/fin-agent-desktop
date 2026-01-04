@@ -147,13 +147,23 @@ class RequestHandler(BaseHTTPRequestHandler):
         """Override to add error catching."""
         try:
             BaseHTTPRequestHandler.handle_one_request(self)
-        except Exception as e:
-            sys.stderr.write(f"[HTTP] Error in handle_one_request(): {e}\n")
-            import traceback
-            traceback.print_exc(file=sys.stderr)
-            sys.stderr.flush()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError) as e:
+            # 客户端断开连接（用户主动停止），静默处理，不打印错误
             # Close the connection
             self.close_connection = True
+        except Exception as e:
+            # 检查是否是连接相关的错误（用户主动停止）
+            if isinstance(e, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError)):
+                # 用户主动停止，静默处理
+                self.close_connection = True
+            else:
+                # 真正的错误，才打印日志
+                sys.stderr.write(f"[HTTP] Error in handle_one_request(): {e}\n")
+                import traceback
+                traceback.print_exc(file=sys.stderr)
+                sys.stderr.flush()
+                # Close the connection
+                self.close_connection = True
     
     def do_GET(self):
         # debug_print(f"Received GET request: {self.path}")
@@ -285,8 +295,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                                 self.wfile.write(data_line.encode('utf-8'))
                                 self.wfile.flush()
                                 # debug_print(f"Sent event #{event_count} successfully", file=sys.stderr)
-                            except (BrokenPipeError, ConnectionResetError):
-                                # debug_print("Client disconnected", file=sys.stderr)
+                            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+                                # 客户端断开连接（用户主动停止），静默处理，不打印错误
                                 break
                         
                         # debug_print(f"Finished event loop, sent {event_count} events", file=sys.stderr)
@@ -295,38 +305,59 @@ class RequestHandler(BaseHTTPRequestHandler):
                         try:
                             self.wfile.write(b"data: [DONE]\n\n")
                             self.wfile.flush()
-                        except (BrokenPipeError, ConnectionResetError):
+                        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+                            # 客户端断开连接（用户主动停止），静默处理
                             pass
                             
                         # debug_print("Sent [DONE] signal", file=sys.stderr)
                             
+                    except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+                        # 客户端断开连接（用户主动停止），静默处理，不打印错误
+                        pass
                     except Exception as e:
-                        trace_str = traceback.format_exc()
-                        sys.stderr.write(f"Agent execution error: {e}\n{trace_str}\n")
-                        # Send error event if connection still open
-                        error_payload = json.dumps({"type": "error", "content": f"Error: {str(e)}"})
-                        try:
-                            self.wfile.write(f"data: {error_payload}\n\n".encode('utf-8'))
-                            self.wfile.flush()
-                        except:
+                        # 检查是否是连接相关的错误（用户主动停止）
+                        if isinstance(e, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError)):
+                            # 用户主动停止，静默处理
                             pass
+                        else:
+                            # 真正的错误，才打印日志
+                            import traceback
+                            trace_str = traceback.format_exc()
+                            sys.stderr.write(f"Agent execution error: {e}\n{trace_str}\n")
+                            # Send error event if connection still open
+                            error_payload = json.dumps({"type": "error", "content": f"Error: {str(e)}"})
+                            try:
+                                self.wfile.write(f"data: {error_payload}\n\n".encode('utf-8'))
+                                self.wfile.flush()
+                            except:
+                                pass
     
                 except json.JSONDecodeError:
                     self.send_response(400)
                     self.end_headers()
                     self.wfile.write(b"Invalid JSON")
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+                    # 客户端断开连接（用户主动停止），静默处理，不打印错误
+                    pass
                 except Exception as e:
-                    sys.stderr.write(f"Server Error in /chat: {e}\n{traceback.format_exc()}\n")
-                    # If headers sent, we can't send 500.
-                    # But if we haven't sent headers yet:
-                    # We can't easily know state here without tracking.
-                    # Assuming if we crashed early, headers aren't sent.
-                    try:
-                        self.send_response(500)
-                        self.end_headers()
-                        self.wfile.write(f"Internal Server Error: {e}".encode('utf-8'))
-                    except:
+                    # 检查是否是连接相关的错误（用户主动停止）
+                    if isinstance(e, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError)):
+                        # 用户主动停止，静默处理
                         pass
+                    else:
+                        # 真正的错误，才打印日志
+                        import traceback
+                        sys.stderr.write(f"Server Error in /chat: {e}\n{traceback.format_exc()}\n")
+                        # If headers sent, we can't send 500.
+                        # But if we haven't sent headers yet:
+                        # We can't easily know state here without tracking.
+                        # Assuming if we crashed early, headers aren't sent.
+                        try:
+                            self.send_response(500)
+                            self.end_headers()
+                            self.wfile.write(f"Internal Server Error: {e}".encode('utf-8'))
+                        except:
+                            pass
     
             elif self.path == '/notification':
                 # Handle desktop notification from scheduler
@@ -425,8 +456,18 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.send_response(404)
                 self.end_headers()
                 
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+            # 客户端断开连接（用户主动停止），静默处理，不打印错误
+            pass
         except Exception as e:
-             sys.stderr.write(f"Fatal error in do_POST: {e}\n{traceback.format_exc()}\n")
+            # 检查是否是连接相关的错误（用户主动停止）
+            if isinstance(e, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError)):
+                # 用户主动停止，静默处理
+                pass
+            else:
+                # 真正的错误，才打印日志
+                import traceback
+                sys.stderr.write(f"Fatal error in do_POST: {e}\n{traceback.format_exc()}\n")
 
 def monitor_parent_process():
     """监控父进程，如果父进程退出则自动退出当前进程"""
