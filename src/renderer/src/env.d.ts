@@ -39,5 +39,7 @@ declare interface Window {
     suspendShortcut: () => Promise<void>
     resumeShortcut: () => Promise<void>
     checkShortcut: (shortcut: string) => Promise<boolean>
+    getAutoLaunch: () => Promise<boolean>
+    setAutoLaunch: (enabled: boolean) => Promise<boolean>
   }
 }

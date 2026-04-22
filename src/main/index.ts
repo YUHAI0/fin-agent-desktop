@@ -55,6 +55,11 @@ let hasConversationContext = false  // 跟踪是否有对话上下文
 let isCleaningUp = false  // 防止重复执行清理
 let currentRequest: http.ClientRequest | null = null  // 保存当前正在进行的 HTTP 请求
 let isUserStopped = false  // 标记是否是用户主动停止
+let serverReady = false
+let serverReadyResolve: (() => void) | null = null
+const serverReadyPromise = new Promise<void>((resolve) => {
+  serverReadyResolve = resolve
+})
 
 // Read version from VERSION file
 function getVersion(): string {
@@ -142,7 +147,7 @@ async function killProcessOnPort(port: number): Promise<void> {
   }
 }
 
-function makeApiRequest(path: string, method: string = 'GET', data?: any): Promise<any> {
+function makeApiRequestRaw(path: string, method: string = 'GET', data?: any): Promise<any> {
   return new Promise((resolve, reject) => {
     const options: http.RequestOptions = {
       hostname: '127.0.0.1',
@@ -178,6 +183,14 @@ function makeApiRequest(path: string, method: string = 'GET', data?: any): Promi
     }
     req.end()
   })
+}
+
+async function makeApiRequest(path: string, method: string = 'GET', data?: any): Promise<any> {
+  if (!serverReady) {
+    console.log(`[API] Waiting for Python server before ${method} ${path}...`)
+    await serverReadyPromise
+  }
+  return makeApiRequestRaw(path, method, data)
 }
 
 async function startPythonServer() {
@@ -749,6 +762,10 @@ function checkForUpdates() {
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('fin-agent')
 
+  if (!app.getLoginItemSettings().openAtLogin) {
+    app.setLoginItemSettings({ openAtLogin: true })
+  }
+
   // 禁用应用菜单栏
   Menu.setApplicationMenu(null)
 
@@ -782,30 +799,38 @@ app.whenReady().then(() => {
   // Polling for API readiness and config check
   const checkConfigLoop = async () => {
     let attempts = 0
-    while (attempts < 20) { // Try for 20 seconds
+    while (attempts < 30) {
       try {
-        // First get the full config to register shortcut (even if not fully configured)
-        const config = await makeApiRequest('/config')
+        const config = await makeApiRequestRaw('/config')
+
+        if (!serverReady) {
+          serverReady = true
+          serverReadyResolve?.()
+          console.log('[Main] Python server is ready')
+        }
+
         if (config && config.wake_up_shortcut) {
             registerGlobalShortcut(config.wake_up_shortcut)
         } else {
-            registerGlobalShortcut('Ctrl+Alt+Q') // Default fallback
+            registerGlobalShortcut('Ctrl+Alt+Q')
         }
 
-        const res = await makeApiRequest('/config/check')
+        const res = await makeApiRequestRaw('/config/check')
         if (res && res.configured === false) {
           console.log('[Main] Config missing, but allowing user to see main interface first')
-          // 不再自动跳转，让用户首次运行时能看到主界面
-          // 配置检查将在用户尝试发送消息时进行
         } else {
           console.log('[Main] Config check passed')
         }
         break; 
       } catch (e) {
-        // API likely not ready yet
         await new Promise(r => setTimeout(r, 1000))
         attempts++
       }
+    }
+    if (!serverReady) {
+      console.error('[Main] Python server failed to start after 30 seconds')
+      serverReady = true
+      serverReadyResolve?.()
     }
   }
   
@@ -1169,6 +1194,16 @@ app.whenReady().then(() => {
 
   ipcMain.handle('get-version', () => {
     return getVersion()
+  })
+
+  ipcMain.handle('get-auto-launch', () => {
+    const settings = app.getLoginItemSettings()
+    return settings.openAtLogin
+  })
+
+  ipcMain.handle('set-auto-launch', (_, enabled: boolean) => {
+    app.setLoginItemSettings({ openAtLogin: enabled })
+    return app.getLoginItemSettings().openAtLogin
   })
 
   // 重置对话上下文（清空对话时调用）

@@ -249,13 +249,18 @@ const ChatView: React.FC = () => {
             } else if (data.type === 'tool_call') {
                 const argsStr = typeof data.args === 'string' ? data.args : JSON.stringify(data.args)
                 
-                // Update existing block with final args if matched
-                const lastTool = getLastToolExecution()
-                if (lastTool && lastTool.status === 'running' && lastTool.name === data.tool_name) {
-                    // Replace args with final version to avoid duplicates
-                    lastTool.args = argsStr
+                // Find existing running block with same name (search from end)
+                let existingTool: ToolExecutionBlock | null = null
+                for (let i = assistantMsg.blocks.length - 1; i >= 0; i--) {
+                    const block = assistantMsg.blocks[i]
+                    if (block.type === 'tool_execution' && block.status === 'running' && block.name === data.tool_name) {
+                        existingTool = block
+                        break
+                    }
+                }
+                if (existingTool) {
+                    existingTool.args = argsStr
                 } else {
-                    // Fallback create (shouldn't happen if stream worked, but safety first)
                     assistantMsg.blocks.push({ 
                         type: 'tool_execution', 
                         name: data.tool_name, 
@@ -315,14 +320,20 @@ const ChatView: React.FC = () => {
                  // Truncate long results for display
                 const rawResult = data?.result == null ? '' : String(data.result)
                 
-                // Update last tool execution block
-                const lastTool = getLastToolExecution()
-                if (lastTool && lastTool.type === 'tool_execution') { // Double check type for TS
-                    lastTool.result = rawResult
-                    lastTool.status = 'success'
+                // Find the matching running tool block (search from end)
+                let matchedTool: ToolExecutionBlock | null = null
+                for (let i = assistantMsg.blocks.length - 1; i >= 0; i--) {
+                    const block = assistantMsg.blocks[i]
+                    if (block.type === 'tool_execution' && block.status === 'running') {
+                        matchedTool = block
+                        break
+                    }
+                }
+                if (matchedTool) {
+                    matchedTool.result = rawResult
+                    matchedTool.status = 'success'
                 } else {
-                    // Fallback if no matching call block found (should rarely happen in stream)
-                     assistantMsg.blocks.push({ 
+                    assistantMsg.blocks.push({ 
                         type: 'tool_execution', 
                         name: data.tool_name, 
                         args: '(Missing input)', 
@@ -439,7 +450,11 @@ const ChatView: React.FC = () => {
           >
             <Settings size={18} />
           </button>
-          <div className="text-xs text-gray-500">v{version}</div>
+          <button
+            onClick={() => window.api.openExternal('https://fin-agent.chat')}
+            className="text-xs text-gray-500 hover:text-blue-400 transition-colors cursor-pointer"
+            title="访问官网"
+          >v{version}</button>
         </div>
       </div>
 

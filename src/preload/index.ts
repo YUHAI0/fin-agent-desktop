@@ -54,7 +54,9 @@ const api = {
   quitConfirmed: (confirmed: boolean) => ipcRenderer.send('quit-confirmed', confirmed),
   suspendShortcut: () => ipcRenderer.invoke('suspend-shortcut'),
   resumeShortcut: () => ipcRenderer.invoke('resume-shortcut'),
-  checkShortcut: (shortcut: string) => ipcRenderer.invoke('check-shortcut', shortcut)
+  checkShortcut: (shortcut: string) => ipcRenderer.invoke('check-shortcut', shortcut),
+  getAutoLaunch: () => ipcRenderer.invoke('get-auto-launch'),
+  setAutoLaunch: (enabled: boolean) => ipcRenderer.invoke('set-auto-launch', enabled)
 }
 
 if (process.contextIsolated) {

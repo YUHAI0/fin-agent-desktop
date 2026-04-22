@@ -2,6 +2,15 @@ import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, ExternalLink } from 'lucide-react'
 
+const PROVIDER_PRESETS: Record<string, { label: string; baseUrl: string; model: string; keyUrl: string; color: string; keyPlaceholder: string }> = {
+  deepseek: { label: 'DeepSeek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-chat', keyUrl: 'https://platform.deepseek.com/api_keys', color: 'blue', keyPlaceholder: 'sk-...' },
+  kimi: { label: 'Kimi (月之暗面)', baseUrl: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-128k', keyUrl: 'https://platform.moonshot.cn/console/api-keys', color: 'purple', keyPlaceholder: 'sk-...' },
+  glm: { label: 'GLM (智谱清言)', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-flash', keyUrl: 'https://open.bigmodel.cn/usercenter/apikeys', color: 'emerald', keyPlaceholder: '' },
+  qwen: { label: 'Qwen (通义千问)', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus', keyUrl: 'https://dashscope.console.aliyun.com/apiKey', color: 'orange', keyPlaceholder: 'sk-...' },
+  siliconflow: { label: 'SiliconFlow (硅基流动)', baseUrl: 'https://api.siliconflow.cn/v1', model: 'deepseek-ai/DeepSeek-V3', keyUrl: 'https://cloud.siliconflow.cn/account/ak', color: 'cyan', keyPlaceholder: 'sk-...' },
+  openai: { label: 'OpenAI / 自定义', baseUrl: '', model: '', keyUrl: '', color: 'gray', keyPlaceholder: 'sk-...' },
+}
+
 const ConfigView: React.FC = () => {
   const navigate = useNavigate()
   const [tushareToken, setTushareToken] = useState('')
@@ -18,9 +27,21 @@ const ConfigView: React.FC = () => {
   const [emailSender, setEmailSender] = useState('')
   const [emailPassword, setEmailPassword] = useState('')
   const [emailReceiver, setEmailReceiver] = useState('')
+  const [autoLaunch, setAutoLaunch] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [shortcutStatus, setShortcutStatus] = useState<{valid: boolean, message: string} | null>(null)
+
+  const handleProviderChange = (newProvider: string) => {
+    setProvider(newProvider)
+    if (newProvider !== 'deepseek' && newProvider !== 'openai') {
+      const preset = PROVIDER_PRESETS[newProvider]
+      if (preset) {
+        setOpenaiBase(preset.baseUrl)
+        setOpenaiModel(preset.model)
+      }
+    }
+  }
 
   useEffect(() => {
     const loadConfig = async () => {
@@ -42,6 +63,8 @@ const ConfigView: React.FC = () => {
           setEmailPassword(config.email_password || '')
           setEmailReceiver(config.email_receiver || '')
         }
+        const isAutoLaunch = await window.api.getAutoLaunch()
+        setAutoLaunch(isAutoLaunch)
       } catch (err) {
         console.error('Failed to load config:', err)
       }
@@ -199,11 +222,12 @@ const ConfigView: React.FC = () => {
             <label className="block text-sm font-medium text-gray-300">LLM 提供商</label>
             <select
               value={provider}
-              onChange={(e) => setProvider(e.target.value)}
+              onChange={(e) => handleProviderChange(e.target.value)}
               className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
             >
-              <option value="deepseek">DeepSeek</option>
-              <option value="openai">OpenAI / Compatible</option>
+              {Object.entries(PROVIDER_PRESETS).map(([key, preset]) => (
+                <option key={key} value={key}>{preset.label}</option>
+              ))}
             </select>
           </div>
 
@@ -253,15 +277,36 @@ const ConfigView: React.FC = () => {
               </div>
             </div>
           ) : (
-            <div className="space-y-4 border-l-2 border-green-600 pl-4">
+            <div className={`space-y-4 border-l-2 pl-4 ${
+              provider === 'kimi' ? 'border-purple-600' :
+              provider === 'glm' ? 'border-emerald-600' :
+              provider === 'qwen' ? 'border-orange-500' :
+              provider === 'siliconflow' ? 'border-cyan-500' :
+              'border-green-600'
+            }`}>
               <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-300">API 密钥</label>
+                <div className="flex items-center gap-2">
+                  <label className="block text-sm font-medium text-gray-300">
+                    {PROVIDER_PRESETS[provider]?.label || provider} API Key
+                  </label>
+                  {PROVIDER_PRESETS[provider]?.keyUrl && (
+                    <button
+                      type="button"
+                      onClick={() => window.api.openExternal(PROVIDER_PRESETS[provider].keyUrl)}
+                      className="text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1 text-xs"
+                      title="前往平台获取 API Key"
+                    >
+                      <ExternalLink size={14} />
+                      <span>获取 API Key</span>
+                    </button>
+                  )}
+                </div>
                 <input
                   type="password"
                   value={openaiKey}
                   onChange={(e) => setOpenaiKey(e.target.value)}
                   className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
-                  placeholder="sk-..."
+                  placeholder={PROVIDER_PRESETS[provider]?.keyPlaceholder || 'sk-...'}
                   required
                 />
               </div>
@@ -317,6 +362,22 @@ const ConfigView: React.FC = () => {
                         </span>
                     )}
                 </div>
+             </div>
+             <div className="flex items-center justify-between py-2">
+                <div>
+                  <label className="block text-sm font-medium text-gray-300">开机自动启动</label>
+                  <p className="text-xs text-gray-500">系统启动时自动运行 Fin-Agent</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const result = await window.api.setAutoLaunch(!autoLaunch)
+                    setAutoLaunch(result)
+                  }}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${autoLaunch ? 'bg-blue-600' : 'bg-gray-600'}`}
+                >
+                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${autoLaunch ? 'translate-x-6' : 'translate-x-1'}`} />
+                </button>
              </div>
           </div>
 
