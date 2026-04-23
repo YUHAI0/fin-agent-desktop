@@ -6,8 +6,10 @@ import remarkGfm from 'remark-gfm'
 import { Settings, ChevronDown, ChevronRight, Check, Loader2, Terminal, Bell } from 'lucide-react'
 import { useChat, ChatBlock, Message } from '../contexts/ChatContext'
 import { KlinePanel } from './KlinePanel'
+import { BacktestEquityPanel } from './BacktestEquityPanel'
 import { ReminderTasksModal } from './ReminderTasksModal'
 import { parseToolResultToKline } from '../utils/parseToolOhlc'
+import { parseRunBacktestEquity } from '../utils/parseToolBacktest'
 
 // ToolExecutionBlock type helper
 type ToolExecutionBlock = Extract<ChatBlock, { type: 'tool_execution' }>
@@ -28,12 +30,18 @@ const ToolExecutionView: React.FC<{ block: ToolExecutionBlock }> = ({ block }) =
     () => parseToolResultToKline(block.name, block.args, block.result),
     [block.name, block.args, block.result]
   )
+  const backtestEquity = useMemo(
+    () => parseRunBacktestEquity(block.name, block.args, block.result),
+    [block.name, block.args, block.result]
+  )
   const showKline = block.status === 'success' && klineData != null
+  const showBacktest = block.status === 'success' && backtestEquity != null
+  const showChart = showKline || showBacktest
 
   return (
     <div
       className={`border border-gray-700 rounded-lg bg-gray-900/40 overflow-hidden mb-2 ${
-        showKline ? 'max-w-[min(100%,720px)]' : 'max-w-[600px]'
+        showChart ? 'max-w-[min(100%,720px)]' : 'max-w-[600px]'
       }`}
     >
       <div 
@@ -59,7 +67,11 @@ const ToolExecutionView: React.FC<{ block: ToolExecutionBlock }> = ({ block }) =
       </div>
 
       {showKline && klineData && <KlinePanel title={klineData.label} candles={klineData.candles} />}
-      
+
+      {showBacktest && backtestEquity && (
+        <BacktestEquityPanel title={backtestEquity.label} points={backtestEquity.points} />
+      )}
+
       {isOpen && (
         <div className="border-t border-gray-700/50 bg-black/20 p-3 space-y-3 text-xs font-mono">
            <div>

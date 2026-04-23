@@ -11,7 +11,7 @@ export const KLINE_TOOL_NAMES = new Set([
   'get_futures_daily_price'
 ])
 
-function normalizeTradeDate(raw: unknown): string | null {
+export function normalizeTradeDate(raw: unknown): string | null {
   if (raw == null) return null
   const s = String(raw).trim()
   if (/^\d{8}$/.test(s)) {
