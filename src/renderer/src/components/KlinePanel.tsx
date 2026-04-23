@@ -6,6 +6,7 @@ import {
   CrosshairMode
 } from 'lightweight-charts'
 import type { CandlestickData } from 'lightweight-charts'
+import { chartLocalizationZh, formatTickMarkZh } from '../utils/chartTimeZh'
 
 const CHART_HEIGHT = 260
 
@@ -27,7 +28,8 @@ export const KlinePanel = memo(function KlinePanel({ title, candles }: KlinePane
       height: CHART_HEIGHT,
       layout: {
         background: { type: ColorType.Solid, color: '#0f172a' },
-        textColor: '#94a3b8'
+        textColor: '#94a3b8',
+        attributionLogo: false
       },
       grid: {
         vertLines: { color: 'rgba(55, 65, 81, 0.45)' },
@@ -35,7 +37,11 @@ export const KlinePanel = memo(function KlinePanel({ title, candles }: KlinePane
       },
       crosshair: { mode: CrosshairMode.Normal },
       rightPriceScale: { borderColor: '#374151' },
-      timeScale: { borderColor: '#374151' }
+      localization: { ...chartLocalizationZh },
+      timeScale: {
+        borderColor: '#374151',
+        tickMarkFormatter: (time, tickMarkType) => formatTickMarkZh(time, tickMarkType)
+      }
     })
 
     // 中式习惯：红涨绿跌

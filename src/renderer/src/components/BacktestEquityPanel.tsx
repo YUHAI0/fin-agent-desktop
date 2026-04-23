@@ -1,6 +1,7 @@
 import React, { memo, useEffect, useRef } from 'react'
 import { AreaSeries, ColorType, createChart, CrosshairMode } from 'lightweight-charts'
 import type { SingleValueData } from 'lightweight-charts'
+import { chartLocalizationZh, formatTickMarkZh } from '../utils/chartTimeZh'
 
 const CHART_HEIGHT = 240
 
@@ -25,7 +26,8 @@ export const BacktestEquityPanel = memo(function BacktestEquityPanel({
       height: CHART_HEIGHT,
       layout: {
         background: { type: ColorType.Solid, color: '#0f172a' },
-        textColor: '#94a3b8'
+        textColor: '#94a3b8',
+        attributionLogo: false
       },
       grid: {
         vertLines: { color: 'rgba(55, 65, 81, 0.45)' },
@@ -33,7 +35,11 @@ export const BacktestEquityPanel = memo(function BacktestEquityPanel({
       },
       crosshair: { mode: CrosshairMode.Normal },
       rightPriceScale: { borderColor: '#374151' },
-      timeScale: { borderColor: '#374151' }
+      localization: { ...chartLocalizationZh },
+      timeScale: {
+        borderColor: '#374151',
+        tickMarkFormatter: (time, tickMarkType) => formatTickMarkZh(time, tickMarkType)
+      }
     })
 
     const series = chart.addSeries(AreaSeries, {
