@@ -1,9 +1,11 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Settings, ChevronDown, ChevronRight, Check, Loader2, Terminal } from 'lucide-react'
 import { useChat, ChatBlock } from '../contexts/ChatContext'
+import { KlinePanel } from './KlinePanel'
+import { parseToolResultToKline } from '../utils/parseToolOhlc'
 
 // ToolExecutionBlock type helper
 type ToolExecutionBlock = Extract<ChatBlock, { type: 'tool_execution' }>
@@ -11,12 +13,19 @@ type ToolExecutionBlock = Extract<ChatBlock, { type: 'tool_execution' }>
 // Component for rendering Tool Execution
 const ToolExecutionView: React.FC<{ block: ToolExecutionBlock }> = ({ block }) => {
   const [isOpen, setIsOpen] = useState(false)
-  
-  // Auto-open if running? Maybe not, keeps it clean.
-  // Keep collapsed by default as requested.
+
+  const klineData = useMemo(
+    () => parseToolResultToKline(block.name, block.args, block.result),
+    [block.name, block.args, block.result]
+  )
+  const showKline = block.status === 'success' && klineData != null
 
   return (
-    <div className="border border-gray-700 rounded-lg bg-gray-900/40 overflow-hidden mb-2 max-w-[600px]">
+    <div
+      className={`border border-gray-700 rounded-lg bg-gray-900/40 overflow-hidden mb-2 ${
+        showKline ? 'max-w-[min(100%,720px)]' : 'max-w-[600px]'
+      }`}
+    >
       <div 
         className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-gray-800/50 transition-colors"
         onClick={() => setIsOpen(!isOpen)}
@@ -38,6 +47,8 @@ const ToolExecutionView: React.FC<{ block: ToolExecutionBlock }> = ({ block }) =
             {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         </div>
       </div>
+
+      {showKline && klineData && <KlinePanel title={klineData.label} candles={klineData.candles} />}
       
       {isOpen && (
         <div className="border-t border-gray-700/50 bg-black/20 p-3 space-y-3 text-xs font-mono">
