@@ -1,14 +1,24 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react'
+import { flushSync } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Settings, ChevronDown, ChevronRight, Check, Loader2, Terminal } from 'lucide-react'
-import { useChat, ChatBlock } from '../contexts/ChatContext'
+import { Settings, ChevronDown, ChevronRight, Check, Loader2, Terminal, Bell } from 'lucide-react'
+import { useChat, ChatBlock, Message } from '../contexts/ChatContext'
 import { KlinePanel } from './KlinePanel'
+import { ReminderTasksModal } from './ReminderTasksModal'
 import { parseToolResultToKline } from '../utils/parseToolOhlc'
 
 // ToolExecutionBlock type helper
 type ToolExecutionBlock = Extract<ChatBlock, { type: 'tool_execution' }>
+
+function sameCallIndex(
+  a: number | undefined,
+  b: number | undefined
+): boolean {
+  if (a === undefined || b === undefined) return false
+  return Number(a) === Number(b)
+}
 
 // Component for rendering Tool Execution
 const ToolExecutionView: React.FC<{ block: ToolExecutionBlock }> = ({ block }) => {
@@ -123,6 +133,7 @@ const ChatView: React.FC = () => {
   const [isResponding, setIsResponding] = useState(false) // 跟踪AI是否正在响应
   const [version, setVersion] = useState('...')
   const [autoScroll, setAutoScroll] = useState(true)
+  const [reminderModalOpen, setReminderModalOpen] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -174,8 +185,11 @@ const ChatView: React.FC = () => {
 
     const removeBotStreamListener = window.api.onBotStream((data: any) => {
         if (!data) return;
-        
-        console.log('[ChatView] Received bot-stream event:', data.type)
+
+        // tool_call_chunk / content 在流式下每秒可达数十上百次，逐条打日志会淹没控制台且无助于排错
+        if (data.type !== 'tool_call_chunk' && data.type !== 'content') {
+            console.log('[ChatView] Received bot-stream event:', data.type)
+        }
         
         // 标记AI正在响应（使用函数式更新避免闭包问题）
         setIsResponding(prev => {
@@ -195,16 +209,24 @@ const ChatView: React.FC = () => {
             setIsResponding(false) // AI响应结束
         }
         
-        setMessages(prev => {
+        const patchFromStream = (prev: Message[]) => {
             const newMessages = [...prev]
-            const lastMsg = newMessages[newMessages.length - 1]
-            
+            const lastIdx0 = newMessages.length - 1
+            const lastMsg = lastIdx0 >= 0 ? newMessages[lastIdx0] : undefined
+
             // If last message is not assistant, create one (first event)
             if (!lastMsg || lastMsg.role !== 'assistant') {
                 newMessages.push({ role: 'assistant', content: '', logs: '', blocks: [] })
             }
-            
-            const assistantMsg = newMessages[newMessages.length - 1]
+
+            const ai = newMessages.length - 1
+            const srcAssistant = newMessages[ai]
+            // 与 prev 脱钩：assistant 及每条 block 都换新引用，避免就地改 prev 导致多次 tool_result 不刷新
+            newMessages[ai] = {
+                ...srcAssistant,
+                blocks: (srcAssistant.blocks || []).map((b) => ({ ...b })),
+            }
+            const assistantMsg = newMessages[ai]
             if (!assistantMsg.blocks) assistantMsg.blocks = []
             
             // Helper to get or create last block of specific type
@@ -260,13 +282,31 @@ const ChatView: React.FC = () => {
             } else if (data.type === 'tool_call') {
                 const argsStr = typeof data.args === 'string' ? data.args : JSON.stringify(data.args)
                 
-                // Find existing running block with same name (search from end)
+                // 优先匹配「同名且尚无参数」的运行中块（并行同工具名时按顺序）
                 let existingTool: ToolExecutionBlock | null = null
-                for (let i = assistantMsg.blocks.length - 1; i >= 0; i--) {
+                for (let i = 0; i < assistantMsg.blocks.length; i++) {
                     const block = assistantMsg.blocks[i]
-                    if (block.type === 'tool_execution' && block.status === 'running' && block.name === data.tool_name) {
+                    if (
+                        block.type === 'tool_execution' &&
+                        block.status === 'running' &&
+                        block.name === data.tool_name &&
+                        (!block.args || block.args === '')
+                    ) {
                         existingTool = block
                         break
+                    }
+                }
+                if (!existingTool) {
+                    for (let i = assistantMsg.blocks.length - 1; i >= 0; i--) {
+                        const block = assistantMsg.blocks[i]
+                        if (
+                            block.type === 'tool_execution' &&
+                            block.status === 'running' &&
+                            block.name === data.tool_name
+                        ) {
+                            existingTool = block
+                            break
+                        }
                     }
                 }
                 if (existingTool) {
@@ -283,87 +323,203 @@ const ChatView: React.FC = () => {
                 // Also keep in logs for reference
                 assistantMsg.logs = (assistantMsg.logs || '') + `[Tool Call] ${data.tool_name}(${argsStr})\n`
             } else if (data.type === 'tool_call_chunk') {
-                // Handle streaming tool call data
-                
-                // Try to find the active tool execution block
-                let lastTool = getLastToolExecution()
-                
-                // If we have a name, this might be the start of a tool call
-                if (data.name) {
-                    // If no active tool or the active tool is different/finished, create new
-                    if (!lastTool || lastTool.status !== 'running' || (lastTool.name && lastTool.name !== data.name)) {
-                         const newBlock: ToolExecutionBlock = { 
-                            type: 'tool_execution', 
-                            name: data.name, 
+                const callIndexNum =
+                    typeof data.index === 'number'
+                        ? data.index
+                        : typeof data.index === 'string' && data.index !== '' && !Number.isNaN(Number(data.index))
+                          ? Number(data.index)
+                          : undefined
+                const hasIndex = callIndexNum !== undefined
+                let targetTool: ToolExecutionBlock | null = null
+
+                if (hasIndex) {
+                    for (let i = assistantMsg.blocks.length - 1; i >= 0; i--) {
+                        const block = assistantMsg.blocks[i]
+                        if (
+                            block.type === 'tool_execution' &&
+                            block.status === 'running' &&
+                            sameCallIndex(block.callIndex, callIndexNum)
+                        ) {
+                            targetTool = block
+                            break
+                        }
+                    }
+                    if (
+                        !targetTool &&
+                        (data.name || data.arguments || data.id)
+                    ) {
+                        const newBlock: ToolExecutionBlock = {
+                            type: 'tool_execution',
+                            name: data.name || '',
                             args: '',
                             status: 'running',
+                            callIndex: callIndexNum,
+                            callId: data.id || '',
                             lastChunkLength: 0
                         }
                         assistantMsg.blocks.push(newBlock)
-                        lastTool = newBlock
-                    } else if (!lastTool.name) {
-                        // We had a running block without name? Update it.
-                        lastTool.name = data.name
-                        if (!lastTool.lastChunkLength) {
-                            lastTool.lastChunkLength = 0
+                        targetTool = newBlock
+                    }
+                    if (targetTool) {
+                        if (data.name && !targetTool.name) targetTool.name = data.name
+                        if (data.id) targetTool.callId = (targetTool.callId || '') + data.id
+                    }
+                } else {
+                    let lastTool = getLastToolExecution()
+                    if (data.name) {
+                        if (
+                            !lastTool ||
+                            lastTool.status !== 'running' ||
+                            (lastTool.name && lastTool.name !== data.name)
+                        ) {
+                            const newBlock: ToolExecutionBlock = {
+                                type: 'tool_execution',
+                                name: data.name,
+                                args: '',
+                                status: 'running',
+                                lastChunkLength: 0
+                            }
+                            assistantMsg.blocks.push(newBlock)
+                            lastTool = newBlock
+                        } else if (!lastTool.name) {
+                            lastTool.name = data.name
+                            if (!lastTool.lastChunkLength) {
+                                lastTool.lastChunkLength = 0
+                            }
                         }
                     }
+                    targetTool = getLastToolExecution()
                 }
-                
-                // Append arguments chunk with duplicate detection
-                if (data.arguments && lastTool && lastTool.status === 'running') {
+
+                if (data.arguments && targetTool && targetTool.status === 'running') {
                     const newArgs = data.arguments
-                    const currentArgs = lastTool.args
-                    
-                    // Check if this chunk would create duplicate content
-                    // If the new chunk is already at the end of current args, skip it
+                    const currentArgs = targetTool.args
                     if (newArgs && currentArgs.endsWith(newArgs)) {
-                        // This chunk is a duplicate, skip it
                         return newMessages
                     }
-                    
-                    // Normal case: append new chunk
-                    lastTool.args += newArgs
-                    lastTool.lastChunkLength = lastTool.args.length
+                    targetTool.args += newArgs
+                    targetTool.lastChunkLength = targetTool.args.length
                 }
                 
             } else if (data.type === 'tool_result') {
                  // Truncate long results for display
                 const rawResult = data?.result == null ? '' : String(data.result)
-                
-                // Find the matching running tool block (search from end)
-                let matchedTool: ToolExecutionBlock | null = null
-                for (let i = assistantMsg.blocks.length - 1; i >= 0; i--) {
-                    const block = assistantMsg.blocks[i]
-                    if (block.type === 'tool_execution' && block.status === 'running') {
-                        matchedTool = block
-                        break
+                const tcId: string | undefined =
+                    typeof data.tool_call_id === 'string' && data.tool_call_id
+                        ? data.tool_call_id
+                        : undefined
+                const tcIdx: number | undefined =
+                    typeof data.tool_index === 'number'
+                        ? data.tool_index
+                        : typeof data.tool_index === 'string' &&
+                            data.tool_index !== '' &&
+                            !Number.isNaN(Number(data.tool_index))
+                          ? Number(data.tool_index)
+                          : undefined
+
+                let matchedIdx: number = -1
+
+                // 1) 优先 tool_index：并行同名工具时最可靠（避免 callId 与流式拼接不一致时误匹配）
+                if (tcIdx !== undefined) {
+                    for (let i = 0; i < assistantMsg.blocks.length; i++) {
+                        const block = assistantMsg.blocks[i]
+                        if (
+                            block.type === 'tool_execution' &&
+                            block.status === 'running' &&
+                            sameCallIndex(block.callIndex, tcIdx)
+                        ) {
+                            matchedIdx = i
+                            break
+                        }
                     }
                 }
-                if (matchedTool) {
-                    matchedTool.result = rawResult
-                    matchedTool.status = 'success'
-                } else {
-                    assistantMsg.blocks.push({ 
-                        type: 'tool_execution', 
-                        name: data.tool_name, 
-                        args: '(Missing input)', 
-                        result: rawResult,
-                        status: 'success'
-                    })
+                // 2) 仅当块上已有非空 callId 时才按 id 匹配
+                if (matchedIdx < 0 && tcId) {
+                    for (let i = assistantMsg.blocks.length - 1; i >= 0; i--) {
+                        const block = assistantMsg.blocks[i]
+                        if (
+                            block.type === 'tool_execution' &&
+                            block.status === 'running' &&
+                            block.callId &&
+                            block.callId === tcId
+                        ) {
+                            matchedIdx = i
+                            break
+                        }
+                    }
                 }
-                
+                // 3) 同名 FIFO：第一个仍为 running 的块
+                if (matchedIdx < 0) {
+                    for (let i = 0; i < assistantMsg.blocks.length; i++) {
+                        const block = assistantMsg.blocks[i]
+                        if (
+                            block.type === 'tool_execution' &&
+                            block.status === 'running' &&
+                            block.name === data.tool_name
+                        ) {
+                            matchedIdx = i
+                            break
+                        }
+                    }
+                }
+                // 4) 兜底：从后往前第一个 running
+                if (matchedIdx < 0) {
+                    for (let i = assistantMsg.blocks.length - 1; i >= 0; i--) {
+                        const block = assistantMsg.blocks[i]
+                        if (block.type === 'tool_execution' && block.status === 'running') {
+                            matchedIdx = i
+                            break
+                        }
+                    }
+                }
+                if (matchedIdx >= 0) {
+                    assistantMsg.blocks = assistantMsg.blocks.map((b, i) =>
+                        i === matchedIdx && b.type === 'tool_execution'
+                            ? { ...b, status: 'success' as const, result: rawResult }
+                            : b
+                    )
+                } else {
+                    assistantMsg.blocks = [
+                        ...assistantMsg.blocks,
+                        {
+                            type: 'tool_execution',
+                            name: data.tool_name,
+                            args: '(Missing input)',
+                            result: rawResult,
+                            status: 'success' as const,
+                        },
+                    ]
+                }
+
                 const resultStr = rawResult.length > 500 ? rawResult.substring(0, 500) + '...' : rawResult
                 assistantMsg.logs = (assistantMsg.logs || '') + `[Tool Result] ${resultStr}\n`
             } else if (data.type === 'error') {
                 assistantMsg.content += `\n**Error:** ${data.content}`
                 assistantMsg.blocks.push({ type: 'text', content: `\n**Error:** ${data.content}` })
             } else if (data.type === 'finish') {
-                // Final cleanup if needed
+                // 若上游只合并成一次 tool 调用，可能仍有 running 卡片：收尾避免永久转圈
+                assistantMsg.blocks = assistantMsg.blocks.map((b) =>
+                    b.type === 'tool_execution' && b.status === 'running'
+                        ? {
+                              ...b,
+                              status: 'success' as const,
+                              result:
+                                  b.result ||
+                                  '（本轮未收到单独的工具结果，流已结束。若任务已执行可展开查看上方输出。）',
+                          }
+                        : b
+                )
             }
             
             return newMessages
-        })
+        }
+
+        // tool_result / finish 需尽快反映到 UI，避免批处理或收尾时卡片仍转圈
+        if (data.type === 'tool_result' || data.type === 'finish') {
+            flushSync(() => setMessages(patchFromStream))
+        } else {
+            setMessages(patchFromStream)
+        }
     })
 
     // Keep legacy listener for backward compatibility if needed, but mainly use stream now
@@ -455,6 +611,14 @@ const ChatView: React.FC = () => {
         <div className="font-semibold text-lg">Fin-Agent</div>
         <div className="flex items-center gap-3">
           <button
+            type="button"
+            onClick={() => setReminderModalOpen(true)}
+            className="text-gray-400 hover:text-white transition-colors p-1 rounded hover:bg-gray-800"
+            title="提醒任务"
+          >
+            <Bell size={18} />
+          </button>
+          <button
             onClick={() => navigate('/config')}
             className="text-gray-400 hover:text-white transition-colors p-1 rounded hover:bg-gray-800"
             title="设置"
@@ -468,6 +632,8 @@ const ChatView: React.FC = () => {
           >v{version}</button>
         </div>
       </div>
+
+      <ReminderTasksModal open={reminderModalOpen} onClose={() => setReminderModalOpen(false)} />
 
       {/* Messages */}
       <div 

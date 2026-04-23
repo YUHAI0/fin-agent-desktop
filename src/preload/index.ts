@@ -56,7 +56,9 @@ const api = {
   resumeShortcut: () => ipcRenderer.invoke('resume-shortcut'),
   checkShortcut: (shortcut: string) => ipcRenderer.invoke('check-shortcut', shortcut),
   getAutoLaunch: () => ipcRenderer.invoke('get-auto-launch'),
-  setAutoLaunch: (enabled: boolean) => ipcRenderer.invoke('set-auto-launch', enabled)
+  setAutoLaunch: (enabled: boolean) => ipcRenderer.invoke('set-auto-launch', enabled),
+  listSchedulerTasks: () => ipcRenderer.invoke('list-scheduler-tasks'),
+  removeSchedulerTask: (taskId: string) => ipcRenderer.invoke('remove-scheduler-task', taskId)
 }
 
 if (process.contextIsolated) {

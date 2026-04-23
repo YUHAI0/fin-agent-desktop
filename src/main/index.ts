@@ -1009,7 +1009,7 @@ app.whenReady().then(() => {
         const flushEvent = (eventText: string) => {
           // Normalize newlines
           const lines = eventText.split('\n')
-          const dataLines: string[] = []
+          const dataPayloads: string[] = []
 
           for (const rawLine of lines) {
             const line = rawLine.trimEnd()
@@ -1018,31 +1018,33 @@ app.whenReady().then(() => {
             if (line.startsWith('data:')) {
               // "data:" or "data: "
               const value = line.slice(5).replace(/^\s/, '')
-              dataLines.push(value)
+              dataPayloads.push(value)
             }
           }
 
-          if (dataLines.length === 0) return
+          if (dataPayloads.length === 0) return
 
-          const dataStr = dataLines.join('\n')
-          if (dataStr === '[DONE]') {
-            console.log('[Main] Received [DONE], sending finish event to renderer')
-            // 立即清除请求引用，因为生成已经完成
-            currentRequest = null
-            if (chatWindow) {
-              chatWindow.webContents.send('bot-stream', { type: 'finish' })
-              console.log('[Main] Finish event sent to renderer')
+          // SSE 允许同一事件内多行 data:；用 \n 拼成一串再 JSON.parse 会得到非法 JSON，
+          // 导致多条 tool_result 等事件丢失，前端只看到「一条」。
+          for (const value of dataPayloads) {
+            if (value === '[DONE]') {
+              console.log('[Main] Received [DONE], sending finish event to renderer')
+              currentRequest = null
+              if (chatWindow) {
+                chatWindow.webContents.send('bot-stream', { type: 'finish' })
+                console.log('[Main] Finish event sent to renderer')
+              }
+              continue
             }
-            return
-          }
 
-          try {
-            const data = JSON.parse(dataStr)
-            if (chatWindow) {
-              chatWindow.webContents.send('bot-stream', data)
+            try {
+              const data = JSON.parse(value)
+              if (chatWindow) {
+                chatWindow.webContents.send('bot-stream', data)
+              }
+            } catch (e) {
+              console.error('Error parsing SSE data line:', e, value)
             }
-          } catch (e) {
-            console.error('Error parsing SSE data:', e, dataStr)
           }
         }
 
@@ -1194,6 +1196,24 @@ app.whenReady().then(() => {
 
   ipcMain.handle('get-version', () => {
     return getVersion()
+  })
+
+  ipcMain.handle('list-scheduler-tasks', async () => {
+    try {
+      return await makeApiRequest('/scheduler/tasks')
+    } catch (e) {
+      console.error('[Main] list-scheduler-tasks failed:', e)
+      return { error: String(e) }
+    }
+  })
+
+  ipcMain.handle('remove-scheduler-task', async (_, taskId: string) => {
+    try {
+      return await makeApiRequest('/scheduler/tasks/remove', 'POST', { task_id: taskId })
+    } catch (e) {
+      console.error('[Main] remove-scheduler-task failed:', e)
+      return { success: false, error: String(e) }
+    }
   })
 
   ipcMain.handle('get-auto-launch', () => {

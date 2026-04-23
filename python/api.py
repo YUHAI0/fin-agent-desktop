@@ -235,6 +235,21 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.send_response(500)
                 self.end_headers()
                 self.wfile.write(json.dumps({"error": str(e), "trace": traceback.format_exc()}).encode('utf-8'))
+
+        elif self.path == '/scheduler/tasks':
+            try:
+                scheduler = TaskScheduler()
+                tasks = scheduler.list_tasks()
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"tasks": tasks}).encode('utf-8'))
+            except Exception as e:
+                import traceback
+                self.send_response(500)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": str(e), "trace": traceback.format_exc()}).encode('utf-8'))
         else:
             self.send_response(404)
             self.end_headers()
@@ -449,6 +464,36 @@ class RequestHandler(BaseHTTPRequestHandler):
                 except Exception as e:
                     import traceback
                     self.send_response(500)
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"success": False, "error": str(e), "trace": traceback.format_exc()}).encode('utf-8'))
+
+            elif self.path == '/scheduler/tasks/remove':
+                content_length = int(self.headers.get('Content-Length', 0))
+                post_data = self.rfile.read(content_length) if content_length else b'{}'
+                try:
+                    data = json.loads(post_data.decode('utf-8'))
+                    task_id = data.get('task_id')
+                    if not task_id:
+                        self.send_response(400)
+                        self.send_header('Content-type', 'application/json')
+                        self.end_headers()
+                        self.wfile.write(json.dumps({"success": False, "error": "missing task_id"}).encode('utf-8'))
+                    else:
+                        scheduler = TaskScheduler()
+                        removed = scheduler.remove_task(task_id)
+                        self.send_response(200)
+                        self.send_header('Content-type', 'application/json')
+                        self.end_headers()
+                        self.wfile.write(json.dumps({"success": True, "removed": removed}).encode('utf-8'))
+                except json.JSONDecodeError:
+                    self.send_response(400)
+                    self.send_header('Content-type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"success": False, "error": "Invalid JSON"}).encode('utf-8'))
+                except Exception as e:
+                    import traceback
+                    self.send_response(500)
+                    self.send_header('Content-type', 'application/json')
                     self.end_headers()
                     self.wfile.write(json.dumps({"success": False, "error": str(e), "trace": traceback.format_exc()}).encode('utf-8'))
     

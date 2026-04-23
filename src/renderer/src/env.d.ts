@@ -41,5 +41,9 @@ declare interface Window {
     checkShortcut: (shortcut: string) => Promise<boolean>
     getAutoLaunch: () => Promise<boolean>
     setAutoLaunch: (enabled: boolean) => Promise<boolean>
+    listSchedulerTasks: () => Promise<{ tasks?: unknown[]; error?: string }>
+    removeSchedulerTask: (
+      taskId: string
+    ) => Promise<{ success?: boolean; removed?: boolean; error?: string }>
   }
 }

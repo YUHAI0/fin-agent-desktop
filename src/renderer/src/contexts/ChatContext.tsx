@@ -10,6 +10,10 @@ export type ChatBlock =
       result?: string
       status: 'running' | 'success' | 'error'
       lastChunkLength?: number
+      /** 流式 tool_calls 的下标，用于并行多工具时区分参数归属 */
+      callIndex?: number
+      /** 流式拼接的 tool call id，与 tool_result 对齐 */
+      callId?: string
     }
 
 export interface Message {
