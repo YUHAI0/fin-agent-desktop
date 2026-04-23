@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react'
+import { createWelcomeAgentMessage } from '../utils/welcomeAgentMessage'
 
 export type ChatBlock =
   | { type: 'text'; content: string }
@@ -34,36 +35,36 @@ const ChatContext = createContext<ChatContextType | undefined>(undefined)
 
 const STORAGE_KEY = 'fin-agent-chat-history'
 
-export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [messages, setMessages] = useState<Message[]>([])
-
-  // 从 localStorage 加载历史记录
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY)
-      if (saved) {
-        const parsed = JSON.parse(saved)
-        if (Array.isArray(parsed)) {
-          setMessages(parsed)
-        }
+function readInitialMessages(): Message[] {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY)
+    if (saved) {
+      const parsed = JSON.parse(saved) as unknown
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed as Message[]
       }
-    } catch (err) {
-      console.error('[ChatContext] Failed to load chat history:', err)
     }
-  }, [])
+  } catch (err) {
+    console.error('[ChatContext] Failed to load chat history:', err)
+  }
+  return [createWelcomeAgentMessage()]
+}
+
+export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  const [messages, setMessages] = useState<Message[]>(readInitialMessages)
 
   // 监听程序退出时的清空聊天历史事件
   useEffect(() => {
     if (window.api && window.api.onClearChatHistory) {
       const removeListener = window.api.onClearChatHistory(() => {
         console.log('[ChatContext] Received clear-chat-history event')
-        setMessages([])
         try {
           localStorage.removeItem(STORAGE_KEY)
           console.log('[ChatContext] Chat history cleared')
         } catch (err) {
           console.error('[ChatContext] Failed to clear chat history:', err)
         }
+        setMessages([createWelcomeAgentMessage()])
       })
       return removeListener
     }
@@ -85,12 +86,12 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }
 
   const clearMessages = () => {
-    setMessages([])
     try {
       localStorage.removeItem(STORAGE_KEY)
     } catch (err) {
       console.error('[ChatContext] Failed to clear chat history:', err)
     }
+    setMessages([createWelcomeAgentMessage()])
   }
 
   return (

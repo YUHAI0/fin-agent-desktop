@@ -10,6 +10,7 @@ import { BacktestEquityPanel } from './BacktestEquityPanel'
 import { ReminderTasksModal } from './ReminderTasksModal'
 import { parseToolResultToKline } from '../utils/parseToolOhlc'
 import { parseRunBacktestEquity } from '../utils/parseToolBacktest'
+import { getQuickReplyOptions, stripFinAgentChoicesForDisplay } from '../utils/extractReplyQuickOptions'
 
 // ToolExecutionBlock type helper
 type ToolExecutionBlock = Extract<ChatBlock, { type: 'tool_execution' }>
@@ -41,7 +42,7 @@ const ToolExecutionView: React.FC<{ block: ToolExecutionBlock }> = ({ block }) =
   return (
     <div
       className={`border border-gray-700 rounded-lg bg-gray-900/40 overflow-hidden mb-2 ${
-        showChart ? 'max-w-[min(100%,720px)]' : 'max-w-[600px]'
+        showChart ? 'max-w-[min(100%,min(96vw,1400px))]' : 'max-w-[min(100%,900px)]'
       }`}
     >
       <div 
@@ -103,9 +104,10 @@ const ToolExecutionView: React.FC<{ block: ToolExecutionBlock }> = ({ block }) =
 
 // 表格组件配置，提取出来避免重复创建
 const markdownComponents = {
+  /** not-prose：避免 typography 把 table 缩成比正文更小；字号与外层 prose-sm 段落对齐 */
   table: ({ children, ...props }: any) => (
-    <div className="overflow-x-auto my-4 -mx-4 px-4">
-      <table {...props} className="min-w-full border-collapse">
+    <div className="not-prose my-4 w-full overflow-x-auto rounded-lg border border-gray-700/60 bg-gray-950/40 text-sm leading-7">
+      <table {...props} className="w-full min-w-[640px] border-collapse">
         {children}
       </table>
     </div>
@@ -121,12 +123,18 @@ const markdownComponents = {
     </tbody>
   ),
   th: ({ children, ...props }: any) => (
-    <th {...props} className="border border-gray-700 px-4 py-2 text-left font-semibold text-gray-200 whitespace-nowrap">
+    <th
+      {...props}
+      className="border border-gray-700 px-4 py-2 text-left text-sm font-semibold leading-7 text-gray-200 whitespace-nowrap"
+    >
       {children}
     </th>
   ),
   td: ({ children, ...props }: any) => (
-    <td {...props} className="border border-gray-700 px-4 py-2 text-gray-300 whitespace-nowrap">
+    <td
+      {...props}
+      className="border border-gray-700 px-4 py-2 text-sm font-normal leading-7 text-gray-300 whitespace-nowrap"
+    >
       {children}
     </td>
   ),
@@ -169,6 +177,12 @@ const ChatView: React.FC = () => {
         setAutoScroll(false)
     }
   }
+
+  /** 根据最后一条助手消息末尾的编号/列表，启发式生成可点击选项 */
+  const quickReplyOptions = useMemo(
+    () => getQuickReplyOptions(messages, isResponding, isTyping),
+    [messages, isResponding, isTyping]
+  )
 
   useEffect(() => {
     scrollToBottom()
@@ -561,49 +575,50 @@ const ChatView: React.FC = () => {
     }
   }, [])
 
+  const sendUserText = async (text: string) => {
+    const trimmed = text.trim()
+    if (!trimmed) return
+
+    try {
+      const status = await window.api.checkConfig()
+      if (!status.configured) {
+        navigate('/config')
+        return
+      }
+    } catch (err) {
+      console.error('[ChatView] Config check failed:', err)
+      navigate('/config')
+      return
+    }
+
+    window.api.submitInput(trimmed)
+    setInput('')
+    setIsResponding(true)
+    setTimeout(() => {
+      inputRef.current?.focus()
+      setAutoScroll(true)
+      scrollToBottom()
+    }, 0)
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     console.log('[ChatView] handleSubmit called, input:', input)
-    
-    // 如果AI正在响应，点击按钮应该是停止生成
+
     if (isResponding) {
       console.log('[ChatView] Stopping generation...')
       window.api.stopGeneration()
       setIsResponding(false)
       return
     }
-    
+
     if (!input.trim()) {
       console.log('[ChatView] Input is empty, returning')
       return
     }
-    
-    // Check config first
-    try {
-      const status = await window.api.checkConfig()
-      if (!status.configured) {
-        console.log('[ChatView] Config not configured, redirecting to config page')
-        navigate('/config')
-        return
-      }
-    } catch (err) {
-      console.error('[ChatView] Config check failed:', err)
-      // If check fails, assume not configured and redirect
-      navigate('/config')
-      return
-    }
 
     console.log('[ChatView] Sending input to main process:', input)
-    // Send to main process
-    window.api.submitInput(input)
-    setInput('')
-    setIsResponding(true) // 标记AI开始响应
-    // Keep focus on input after submit
-    setTimeout(() => {
-        inputRef.current?.focus()
-        setAutoScroll(true) // Force auto scroll on new user message
-        scrollToBottom()
-    }, 0)
+    await sendUserText(input)
   }
   
   // 处理输入框的键盘事件
@@ -651,14 +666,14 @@ const ChatView: React.FC = () => {
       <div 
         ref={scrollContainerRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto p-4 space-y-6 no-drag"
+        className="flex-1 overflow-y-auto px-4 py-4 md:px-8 space-y-6 no-drag"
       >
         {messages.map((msg, idx) => (
           <div key={idx} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start w-full'}`}>
             <div className={`${
               msg.role === 'user' 
-                ? 'bg-blue-600 text-white rounded-2xl px-4 py-3 max-w-[90%]' 
-                : 'text-gray-100 py-2 w-full max-w-[800px]'
+                ? 'bg-blue-600 text-white rounded-2xl px-4 py-3 max-w-[min(90%,42rem)]' 
+                : 'text-gray-100 py-2 w-full min-w-0 max-w-full'
             }`}>
               {msg.role === 'user' ? (
                 msg.content
@@ -681,13 +696,14 @@ const ChatView: React.FC = () => {
                         return <ToolExecutionView key={bIdx} block={block} />
                     }
                     if (block.type === 'text') {
+                      const md = stripFinAgentChoicesForDisplay(block.content)
                       return (
                         <div key={bIdx} className="prose prose-invert prose-sm max-w-none">
                           <ReactMarkdown 
                             remarkPlugins={[remarkGfm]}
                             components={markdownComponents}
                           >
-                            {block.content}
+                            {md}
                           </ReactMarkdown>
                         </div>
                       )
@@ -702,7 +718,7 @@ const ChatView: React.FC = () => {
                           remarkPlugins={[remarkGfm]}
                           components={markdownComponents}
                         >
-                          {msg.content}
+                          {stripFinAgentChoicesForDisplay(msg.content)}
                         </ReactMarkdown>
                      </div>
                   )}
@@ -714,7 +730,7 @@ const ChatView: React.FC = () => {
           </div>
         ))}
         {isTyping && (
-           <div className="flex justify-start">
+           <div className="flex w-full min-w-0 justify-start">
             <div className="text-gray-500 py-2 flex gap-1 items-center">
               <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce"></span>
               <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce delay-100"></span>
@@ -726,7 +742,25 @@ const ChatView: React.FC = () => {
       </div>
 
       {/* Input Area */}
-      <div className="p-4 border-t border-gray-800 bg-gray-900/50 backdrop-blur no-drag">
+      <div className="border-t border-gray-800 bg-gray-900/50 backdrop-blur px-4 py-4 md:px-8 no-drag">
+        {quickReplyOptions.length > 0 && (
+          <div className="mb-3 flex flex-col gap-2">
+            <div className="text-[11px] text-slate-500">可选回复（助手附带或自动识别；不足时补充通用追问）</div>
+            <div className="flex flex-wrap gap-2">
+              {quickReplyOptions.map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  disabled={isResponding || isTyping}
+                  onClick={() => void sendUserText(opt.sendText)}
+                  className="max-w-full break-words rounded-xl border border-slate-600 bg-slate-800/90 px-3 py-2 text-left text-sm text-slate-100 transition-colors hover:border-blue-500/50 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <form onSubmit={handleSubmit} className="flex gap-2">
           <input
             ref={inputRef}
