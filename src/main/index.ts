@@ -56,10 +56,17 @@ let isCleaningUp = false  // 防止重复执行清理
 let currentRequest: http.ClientRequest | null = null  // 保存当前正在进行的 HTTP 请求
 let isUserStopped = false  // 标记是否是用户主动停止
 let serverReady = false
-let serverReadyResolve: (() => void) | null = null
-const serverReadyPromise = new Promise<void>((resolve) => {
-  serverReadyResolve = resolve
-})
+
+const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms))
+
+function isConnectionRefused(error: unknown): boolean {
+  return Boolean(
+    error &&
+    typeof error === 'object' &&
+    'code' in error &&
+    (error as NodeJS.ErrnoException).code === 'ECONNREFUSED'
+  )
+}
 
 // Read version from VERSION file
 function getVersion(): string {
@@ -185,12 +192,45 @@ function makeApiRequestRaw(path: string, method: string = 'GET', data?: any): Pr
   })
 }
 
-async function makeApiRequest(path: string, method: string = 'GET', data?: any): Promise<any> {
-  if (!serverReady) {
-    console.log(`[API] Waiting for Python server before ${method} ${path}...`)
-    await serverReadyPromise
+async function waitForPythonServer(timeoutMs = 60000): Promise<void> {
+  if (serverReady) {
+    return
   }
-  return makeApiRequestRaw(path, method, data)
+
+  const startedAt = Date.now()
+  let lastError: unknown = null
+
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      await makeApiRequestRaw('/config')
+      serverReady = true
+      console.log('[Main] Python server is ready')
+      return
+    } catch (error) {
+      lastError = error
+      await sleep(500)
+    }
+  }
+
+  throw new Error(
+    `Python 服务启动超时，请稍后重试或重启应用。${lastError instanceof Error ? ` (${lastError.message})` : ''}`
+  )
+}
+
+async function makeApiRequest(path: string, method: string = 'GET', data?: any): Promise<any> {
+  try {
+    await waitForPythonServer()
+    return await makeApiRequestRaw(path, method, data)
+  } catch (error) {
+    if (!isConnectionRefused(error)) {
+      throw error
+    }
+
+    serverReady = false
+    console.log(`[API] Python server refused connection before ${method} ${path}, retrying...`)
+    await waitForPythonServer()
+    return await makeApiRequestRaw(path, method, data)
+  }
 }
 
 async function startPythonServer() {
@@ -805,7 +845,6 @@ app.whenReady().then(() => {
 
         if (!serverReady) {
           serverReady = true
-          serverReadyResolve?.()
           console.log('[Main] Python server is ready')
         }
 
@@ -829,8 +868,6 @@ app.whenReady().then(() => {
     }
     if (!serverReady) {
       console.error('[Main] Python server failed to start after 30 seconds')
-      serverReady = true
-      serverReadyResolve?.()
     }
   }
   

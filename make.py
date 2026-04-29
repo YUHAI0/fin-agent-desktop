@@ -27,6 +27,20 @@ def run(cmd, cwd=None):
 
 import json
 
+def ensure_python_submodule_ready():
+    """确保 Python 核心子模块已拉取，否则打包出的后端无法启动。"""
+    required_paths = [
+        FIN_AGENT_DIR / "fin_agent",
+        FIN_AGENT_DIR / "requirements.txt"
+    ]
+
+    if all(path.exists() for path in required_paths):
+        return
+
+    log("Python 子模块未初始化或内容不完整: python/fin-agent", "ERROR")
+    log("请先执行: git submodule update --init --recursive", "ERROR")
+    sys.exit(1)
+
 def prepare_resources():
     """准备图标和其他资源"""
     resources_dir = PROJECT_ROOT / "resources"
@@ -162,6 +176,7 @@ def main():
 
     # 0. 同步版本号
     update_package_version()
+    ensure_python_submodule_ready()
     
     # 1. 清理
     log("清理旧文件...")
@@ -264,7 +279,7 @@ def main():
     for target in targets:
         cmd_key = f"build:{target}"
         # Check if script exists in package.json (optional but good)
-        cmd = f"npm run {cmd_key}"
+        cmd = "npm run pack:mac" if target == "mac" else f"npm run {cmd_key}"
         log(f"正在构建 {target} 包: {cmd}")
         
         result = subprocess.run(cmd, shell=True, cwd=PROJECT_ROOT, env=env)

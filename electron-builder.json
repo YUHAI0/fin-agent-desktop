@@ -6,6 +6,7 @@
     "output": "dist",
     "buildResources": "resources"
   },
+  "afterPack": "scripts/after-pack-mac.cjs",
   "files": [
     "out/**/*",
     "resources/**/*",
