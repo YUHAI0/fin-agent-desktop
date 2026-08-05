@@ -4,6 +4,7 @@ import json
 import faulthandler
 import socket
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
 from socketserver import ThreadingMixIn
 import io
 import contextlib
@@ -106,6 +107,131 @@ def init_agent():
         sys.stderr.flush()
         agent = None
 
+class ApiError(Exception):
+    """handler 抛出此异常以返回非 200 响应。"""
+    def __init__(self, status, message):
+        super().__init__(message)
+        self.status = status
+        self.message = message
+
+
+class ApiRequest:
+    """统一的请求载体。GET 用 query，POST 用 body。"""
+    def __init__(self, path, query, body):
+        self.path = path
+        self.query = query
+        self.body = body
+
+
+# 端点注册表：(HTTP 方法, 路径) -> handler(ApiRequest) -> dict
+ROUTES = {}
+
+
+def route(method, path):
+    """装饰器：把 handler 注册进 ROUTES。"""
+    def decorator(func):
+        ROUTES[(method, path)] = func
+        return func
+    return decorator
+
+
+@route("GET", "/config")
+def handle_get_config(req):
+    Config.load()
+    return {
+        "tushare_token": Config.TUSHARE_TOKEN or "",
+        "provider": Config.LLM_PROVIDER or "deepseek",
+        "deepseek_key": Config.DEEPSEEK_API_KEY or "",
+        "deepseek_base": Config.DEEPSEEK_BASE_URL or "https://api.deepseek.com",
+        "deepseek_model": Config.DEEPSEEK_MODEL or "deepseek-chat",
+        "openai_key": Config.OPENAI_API_KEY or "",
+        "openai_base": Config.OPENAI_BASE_URL or "",
+        "openai_model": Config.OPENAI_MODEL or "",
+        "wake_up_shortcut": Config.WAKE_UP_SHORTCUT or "Ctrl+Alt+Q",
+        "email_server": Config.EMAIL_SMTP_SERVER or "",
+        "email_port": str(Config.EMAIL_SMTP_PORT) if Config.EMAIL_SMTP_PORT else "465",
+        "email_sender": Config.EMAIL_SENDER or "",
+        "email_password": Config.EMAIL_PASSWORD or "",
+        "email_receiver": Config.EMAIL_RECEIVER or ""
+    }
+
+
+@route("GET", "/notifications/poll")
+def handle_notifications_poll(req):
+    with notification_lock:
+        notifications = notification_queue.copy()
+        notification_queue.clear()
+    return {"notifications": notifications}
+
+
+@route("GET", "/config/check")
+def handle_config_check(req):
+    try:
+        Config.validate()
+        return {"configured": True, "message": []}
+    except ValueError as e:
+        return {"configured": False, "message": str(e)}
+
+
+@route("GET", "/scheduler/tasks")
+def handle_scheduler_tasks(req):
+    scheduler = TaskScheduler()
+    return {"tasks": scheduler.list_tasks()}
+
+
+@route("POST", "/notification")
+def handle_notification(req):
+    title = req.body.get('title', 'Fin-Agent 提醒')
+    body = req.body.get('body', '')
+    with notification_lock:
+        notification_queue.append({
+            "title": title,
+            "body": body,
+            "timestamp": time.time()
+        })
+    debug_print(f"Desktop notification queued: {title} - {body}")
+    return {"success": True}
+
+
+@route("POST", "/config/save")
+def handle_config_save(req):
+    data = req.body
+    Config.update_core_config(
+        data.get('tushare_token', ''),
+        data.get('provider', 'deepseek'),
+        data.get('deepseek_key', ''),
+        data.get('deepseek_base', 'https://api.deepseek.com'),
+        data.get('deepseek_model', 'deepseek-chat'),
+        data.get('openai_key', ''),
+        data.get('openai_base', ''),
+        data.get('openai_model', ''),
+        data.get('wake_up_shortcut', 'Ctrl+Alt+Q')
+    )
+
+    email_server = data.get('email_server', '')
+    email_sender = data.get('email_sender', '')
+    if email_server and email_sender:
+        Config.update_email_config(
+            email_server,
+            data.get('email_port', '465'),
+            email_sender,
+            data.get('email_password', ''),
+            data.get('email_receiver', '')
+        )
+
+    init_agent()
+    return {"success": True, "path": Config.get_env_path()}
+
+
+@route("POST", "/scheduler/tasks/remove")
+def handle_scheduler_task_remove(req):
+    task_id = req.body.get('task_id')
+    if not task_id:
+        raise ApiError(400, "missing task_id")
+    scheduler = TaskScheduler()
+    return {"success": True, "removed": scheduler.remove_task(task_id)}
+
+
 class RequestHandler(BaseHTTPRequestHandler):
     # Increase buffer sizes
     rbufsize = -1  # Use buffered reading
@@ -165,342 +291,143 @@ class RequestHandler(BaseHTTPRequestHandler):
                 # Close the connection
                 self.close_connection = True
     
-    def do_GET(self):
-        # debug_print(f"Received GET request: {self.path}")
-        if self.path == '/config':
-            try:
-                Config.load()
-                config_data = {
-                    "tushare_token": Config.TUSHARE_TOKEN or "",
-                    "provider": Config.LLM_PROVIDER or "deepseek",
-                    "deepseek_key": Config.DEEPSEEK_API_KEY or "",
-                    "deepseek_base": Config.DEEPSEEK_BASE_URL or "https://api.deepseek.com",
-                    "deepseek_model": Config.DEEPSEEK_MODEL or "deepseek-chat",
-                    "openai_key": Config.OPENAI_API_KEY or "",
-                    "openai_base": Config.OPENAI_BASE_URL or "",
-                    "openai_model": Config.OPENAI_MODEL or "",
-                    "wake_up_shortcut": Config.WAKE_UP_SHORTCUT or "Ctrl+Alt+Q",
-                    "email_server": Config.EMAIL_SMTP_SERVER or "",
-                    "email_port": str(Config.EMAIL_SMTP_PORT) if Config.EMAIL_SMTP_PORT else "465",
-                    "email_sender": Config.EMAIL_SENDER or "",
-                    "email_password": Config.EMAIL_PASSWORD or "",
-                    "email_receiver": Config.EMAIL_RECEIVER or ""
-                }
-                
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.end_headers()
-                self.wfile.write(json.dumps(config_data).encode('utf-8'))
-            except Exception as e:
-                import traceback
-                self.send_response(500)
-                self.end_headers()
-                self.wfile.write(json.dumps({"error": str(e), "trace": traceback.format_exc()}).encode('utf-8'))
+    def _send_json(self, status, payload):
+        data = json.dumps(payload).encode('utf-8')
+        self.send_response(status)
+        self.send_header('Content-type', 'application/json')
+        self.send_header('Content-Length', str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
-        elif self.path == '/notifications/poll':
-            # Poll for pending notifications (used by Electron)
-            try:
-                with notification_lock:
-                    notifications = notification_queue.copy()
-                    notification_queue.clear()
-                
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.end_headers()
-                self.wfile.write(json.dumps({"notifications": notifications}).encode('utf-8'))
-            except Exception as e:
-                import traceback
-                self.send_response(500)
-                self.end_headers()
-                self.wfile.write(json.dumps({"error": str(e), "trace": traceback.format_exc()}).encode('utf-8'))
-        
-        elif self.path == '/config/check':
-            try:
-                # Use validate to check if configured
-                try:
-                    Config.validate()
-                    is_configured = True
-                    missing = []
-                except ValueError as e:
-                    is_configured = False
-                    # Extract missing vars from exception message if possible, or just send message
-                    missing = str(e)
-                
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.end_headers()
-                self.wfile.write(json.dumps({"configured": is_configured, "message": missing}).encode('utf-8'))
-            except Exception as e:
-                import traceback
-                self.send_response(500)
-                self.end_headers()
-                self.wfile.write(json.dumps({"error": str(e), "trace": traceback.format_exc()}).encode('utf-8'))
-
-        elif self.path == '/scheduler/tasks':
-            try:
-                scheduler = TaskScheduler()
-                tasks = scheduler.list_tasks()
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.end_headers()
-                self.wfile.write(json.dumps({"tasks": tasks}).encode('utf-8'))
-            except Exception as e:
-                import traceback
-                self.send_response(500)
-                self.send_header('Content-type', 'application/json')
-                self.end_headers()
-                self.wfile.write(json.dumps({"error": str(e), "trace": traceback.format_exc()}).encode('utf-8'))
-        else:
+    def _dispatch(self, method):
+        parsed = urlparse(self.path)
+        handler = ROUTES.get((method, parsed.path))
+        if handler is None:
             self.send_response(404)
             self.end_headers()
+            return
+        try:
+            query = {k: v[0] for k, v in parse_qs(parsed.query).items()}
+            body = {}
+            if method == 'POST':
+                length = int(self.headers.get('Content-Length', 0))
+                if length:
+                    body = json.loads(self.rfile.read(length).decode('utf-8'))
+            result = handler(ApiRequest(parsed.path, query, body))
+            self._send_json(200, result)
+        except ApiError as e:
+            self._send_json(e.status, {"success": False, "error": e.message})
+        except json.JSONDecodeError:
+            self._send_json(400, {"success": False, "error": "Invalid JSON"})
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+            self.close_connection = True
+        except Exception as e:
+            sys.stderr.write(f"[HTTP] handler error on {parsed.path}: {e}\n{traceback.format_exc()}\n")
+            sys.stderr.flush()
+            self._send_json(500, {"error": str(e), "trace": traceback.format_exc()})
+
+    def do_GET(self):
+        self._dispatch('GET')
 
     def do_POST(self):
-        sys.stderr.write(f"[RequestHandler] do_POST called, path={self.path}\n")
-        sys.stderr.flush()
         try:
-            debug_print(f"Received POST request: {self.path}")
-            sys.stderr.write(f"[RequestHandler] After debug_print\n")
-            sys.stderr.flush()
-            
             if self.path == '/chat':
-                sys.stderr.write(f"[RequestHandler] Processing /chat request\n")
-                sys.stderr.flush()
-                content_length = int(self.headers.get('Content-Length', 0))
-                if content_length == 0:
-                     self.send_response(400)
-                     self.end_headers()
-                     self.wfile.write(b"Missing Content-Length")
-                     return
-                     
-                post_data = self.rfile.read(content_length)
-                try:
-                    data = json.loads(post_data.decode('utf-8'))
-                    user_input = data.get('message')
-                    debug_print(f"User input: {user_input}")
-                    
-                    if not agent:
-                         debug_print("Agent not initialized, trying to init...")
-                         init_agent()
-                    
-                    if not agent:
-                         debug_print("Agent init failed, returning 500")
-                         self.send_response(500)
-                         self.end_headers()
-                         self.wfile.write(b"Agent init failed. Please check configuration.")
-                         return
-    
-                    self.send_response(200)
-                    self.send_header('Content-type', 'text/event-stream')
-                    self.send_header('Cache-Control', 'no-cache')
-                    self.send_header('Connection', 'keep-alive')
-                    # Access-Control-Allow-Origin is good practice even for local
-                    self.send_header('Access-Control-Allow-Origin', '*')
-                    self.end_headers()
-    
+                self._handle_chat_stream()
+            else:
+                self._dispatch('POST')
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+            pass
+        except Exception as e:
+            sys.stderr.write(f"Fatal error in do_POST: {e}\n{traceback.format_exc()}\n")
+            sys.stderr.flush()
+
+    def _handle_chat_stream(self):
+        content_length = int(self.headers.get('Content-Length', 0))
+        if content_length == 0:
+             self.send_response(400)
+             self.end_headers()
+             self.wfile.write(b"Missing Content-Length")
+             return
+             
+        post_data = self.rfile.read(content_length)
+        try:
+            data = json.loads(post_data.decode('utf-8'))
+            user_input = data.get('message')
+            debug_print(f"User input: {user_input}")
+            
+            if not agent:
+                 debug_print("Agent not initialized, trying to init...")
+                 init_agent()
+            
+            if not agent:
+                 debug_print("Agent init failed, returning 500")
+                 self.send_response(500)
+                 self.end_headers()
+                 self.wfile.write(b"Agent init failed. Please check configuration.")
+                 return
+
+            self.send_response(200)
+            self.send_header('Content-type', 'text/event-stream')
+            self.send_header('Cache-Control', 'no-cache')
+            self.send_header('Connection', 'keep-alive')
+            # Access-Control-Allow-Origin is good practice even for local
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+
+            try:
+                # Use stream_chat generator which yields structured events
+                # debug_print("Starting event loop in api.py", file=sys.stderr)
+                event_count = 0
+                for event in agent.stream_chat(user_input):
+                    event_count += 1
+                    payload = json.dumps(event)
+                    # debug_print(f"Event #{event_count}: {event.get('type', 'unknown')} - {str(event)[:100]}", file=sys.stderr)
                     try:
-                        # Use stream_chat generator which yields structured events
-                        # debug_print("Starting event loop in api.py", file=sys.stderr)
-                        event_count = 0
-                        for event in agent.stream_chat(user_input):
-                            event_count += 1
-                            payload = json.dumps(event)
-                            # debug_print(f"Event #{event_count}: {event.get('type', 'unknown')} - {str(event)[:100]}", file=sys.stderr)
-                            try:
-                                data_line = f"data: {payload}\n\n"
-                                self.wfile.write(data_line.encode('utf-8'))
-                                self.wfile.flush()
-                                # debug_print(f"Sent event #{event_count} successfully", file=sys.stderr)
-                            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
-                                # 客户端断开连接（用户主动停止），静默处理，不打印错误
-                                break
-                        
-                        # debug_print(f"Finished event loop, sent {event_count} events", file=sys.stderr)
-                        
-                        # Send [DONE] to signal end of stream to compatible clients
-                        try:
-                            self.wfile.write(b"data: [DONE]\n\n")
-                            self.wfile.flush()
-                        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
-                            # 客户端断开连接（用户主动停止），静默处理
-                            pass
-                            
-                        # debug_print("Sent [DONE] signal", file=sys.stderr)
-                            
+                        data_line = f"data: {payload}\n\n"
+                        self.wfile.write(data_line.encode('utf-8'))
+                        self.wfile.flush()
+                        # debug_print(f"Sent event #{event_count} successfully", file=sys.stderr)
                     except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
                         # 客户端断开连接（用户主动停止），静默处理，不打印错误
-                        pass
-                    except Exception as e:
-                        # 检查是否是连接相关的错误（用户主动停止）
-                        if isinstance(e, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError)):
-                            # 用户主动停止，静默处理
-                            pass
-                        else:
-                            # 真正的错误，才打印日志
-                            import traceback
-                            trace_str = traceback.format_exc()
-                            sys.stderr.write(f"Agent execution error: {e}\n{trace_str}\n")
-                            # Send error event if connection still open
-                            error_payload = json.dumps({"type": "error", "content": f"Error: {str(e)}"})
-                            try:
-                                self.wfile.write(f"data: {error_payload}\n\n".encode('utf-8'))
-                                self.wfile.flush()
-                            except:
-                                pass
-    
-                except json.JSONDecodeError:
-                    self.send_response(400)
-                    self.end_headers()
-                    self.wfile.write(b"Invalid JSON")
+                        break
+                
+                # debug_print(f"Finished event loop, sent {event_count} events", file=sys.stderr)
+                
+                # Send [DONE] to signal end of stream to compatible clients
+                try:
+                    self.wfile.write(b"data: [DONE]\n\n")
+                    self.wfile.flush()
                 except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
-                    # 客户端断开连接（用户主动停止），静默处理，不打印错误
+                    # 客户端断开连接（用户主动停止），静默处理
                     pass
-                except Exception as e:
-                    # 检查是否是连接相关的错误（用户主动停止）
-                    if isinstance(e, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError)):
-                        # 用户主动停止，静默处理
+                    
+                # debug_print("Sent [DONE] signal", file=sys.stderr)
+                    
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+                # 客户端断开连接（用户主动停止），静默处理，不打印错误
+                pass
+            except Exception as e:
+                # 检查是否是连接相关的错误（用户主动停止）
+                if isinstance(e, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError)):
+                    # 用户主动停止，静默处理
+                    pass
+                else:
+                    # 真正的错误，才打印日志
+                    import traceback
+                    trace_str = traceback.format_exc()
+                    sys.stderr.write(f"Agent execution error: {e}\n{trace_str}\n")
+                    # Send error event if connection still open
+                    error_payload = json.dumps({"type": "error", "content": f"Error: {str(e)}"})
+                    try:
+                        self.wfile.write(f"data: {error_payload}\n\n".encode('utf-8'))
+                        self.wfile.flush()
+                    except:
                         pass
-                    else:
-                        # 真正的错误，才打印日志
-                        import traceback
-                        sys.stderr.write(f"Server Error in /chat: {e}\n{traceback.format_exc()}\n")
-                        # If headers sent, we can't send 500.
-                        # But if we haven't sent headers yet:
-                        # We can't easily know state here without tracking.
-                        # Assuming if we crashed early, headers aren't sent.
-                        try:
-                            self.send_response(500)
-                            self.end_headers()
-                            self.wfile.write(f"Internal Server Error: {e}".encode('utf-8'))
-                        except:
-                            pass
-    
-            elif self.path == '/notification':
-                # Handle desktop notification from scheduler
-                content_length = int(self.headers.get('Content-Length', 0))
-                if content_length == 0:
-                    self.send_response(400)
-                    self.end_headers()
-                    self.wfile.write(b"Missing Content-Length")
-                    return
-                
-                post_data = self.rfile.read(content_length)
-                try:
-                    data = json.loads(post_data.decode('utf-8'))
-                    title = data.get('title', 'Fin-Agent 提醒')
-                    body = data.get('body', '')
-                    
-                    # Add notification to queue
-                    with notification_lock:
-                        notification_queue.append({
-                            "title": title,
-                            "body": body,
-                            "timestamp": time.time()
-                        })
-                    
-                    debug_print(f"Desktop notification queued: {title} - {body}")
-                    
-                    # Send response
-                    self.send_response(200)
-                    self.send_header('Content-type', 'application/json')
-                    self.end_headers()
-                    self.wfile.write(json.dumps({"success": True}).encode('utf-8'))
-                except json.JSONDecodeError:
-                    self.send_response(400)
-                    self.end_headers()
-                    self.wfile.write(b"Invalid JSON")
-                except Exception as e:
-                    import traceback
-                    self.send_response(500)
-                    self.end_headers()
-                    self.wfile.write(json.dumps({"error": str(e), "trace": traceback.format_exc()}).encode('utf-8'))
-            
-            elif self.path == '/config/save':
-                content_length = int(self.headers.get('Content-Length', 0))
-                post_data = self.rfile.read(content_length)
-                try:
-                    data = json.loads(post_data.decode('utf-8'))
-                    
-                    # Core Config
-                    tushare_token = data.get('tushare_token', '')
-                    provider = data.get('provider', 'deepseek')
-                    deepseek_key = data.get('deepseek_key', '')
-                    deepseek_base = data.get('deepseek_base', 'https://api.deepseek.com')
-                    deepseek_model = data.get('deepseek_model', 'deepseek-chat')
-                    openai_key = data.get('openai_key', '')
-                    openai_base = data.get('openai_base', '')
-                    openai_model = data.get('openai_model', '')
-                    wake_up_shortcut = data.get('wake_up_shortcut', 'Ctrl+Alt+Q')
 
-                    Config.update_core_config(
-                        tushare_token, provider, 
-                        deepseek_key, deepseek_base, deepseek_model, 
-                        openai_key, openai_base, openai_model,
-                        wake_up_shortcut
-                    )
-
-                    # Email Config
-                    email_server = data.get('email_server', '')
-                    email_port = data.get('email_port', '465')
-                    email_sender = data.get('email_sender', '')
-                    email_password = data.get('email_password', '')
-                    email_receiver = data.get('email_receiver', '')
-
-                    if email_server and email_sender: # Only update if at least server/sender provided
-                        Config.update_email_config(
-                            email_server, email_port, 
-                            email_sender, email_password, email_receiver
-                        )
-                    
-                    # Try to re-init agent
-                    init_agent()
-                    
-                    saved_path = Config.get_env_path()
-                    
-                    self.send_response(200)
-                    self.send_header('Content-type', 'application/json')
-                    self.end_headers()
-                    self.wfile.write(json.dumps({"success": True, "path": saved_path}).encode('utf-8'))
-                    
-                except Exception as e:
-                    import traceback
-                    self.send_response(500)
-                    self.end_headers()
-                    self.wfile.write(json.dumps({"success": False, "error": str(e), "trace": traceback.format_exc()}).encode('utf-8'))
-
-            elif self.path == '/scheduler/tasks/remove':
-                content_length = int(self.headers.get('Content-Length', 0))
-                post_data = self.rfile.read(content_length) if content_length else b'{}'
-                try:
-                    data = json.loads(post_data.decode('utf-8'))
-                    task_id = data.get('task_id')
-                    if not task_id:
-                        self.send_response(400)
-                        self.send_header('Content-type', 'application/json')
-                        self.end_headers()
-                        self.wfile.write(json.dumps({"success": False, "error": "missing task_id"}).encode('utf-8'))
-                    else:
-                        scheduler = TaskScheduler()
-                        removed = scheduler.remove_task(task_id)
-                        self.send_response(200)
-                        self.send_header('Content-type', 'application/json')
-                        self.end_headers()
-                        self.wfile.write(json.dumps({"success": True, "removed": removed}).encode('utf-8'))
-                except json.JSONDecodeError:
-                    self.send_response(400)
-                    self.send_header('Content-type', 'application/json')
-                    self.end_headers()
-                    self.wfile.write(json.dumps({"success": False, "error": "Invalid JSON"}).encode('utf-8'))
-                except Exception as e:
-                    import traceback
-                    self.send_response(500)
-                    self.send_header('Content-type', 'application/json')
-                    self.end_headers()
-                    self.wfile.write(json.dumps({"success": False, "error": str(e), "trace": traceback.format_exc()}).encode('utf-8'))
-    
-            else:
-                self.send_response(404)
-                self.end_headers()
-                
+        except json.JSONDecodeError:
+            self.send_response(400)
+            self.end_headers()
+            self.wfile.write(b"Invalid JSON")
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
             # 客户端断开连接（用户主动停止），静默处理，不打印错误
             pass
@@ -512,7 +439,17 @@ class RequestHandler(BaseHTTPRequestHandler):
             else:
                 # 真正的错误，才打印日志
                 import traceback
-                sys.stderr.write(f"Fatal error in do_POST: {e}\n{traceback.format_exc()}\n")
+                sys.stderr.write(f"Server Error in /chat: {e}\n{traceback.format_exc()}\n")
+                # If headers sent, we can't send 500.
+                # But if we haven't sent headers yet:
+                # We can't easily know state here without tracking.
+                # Assuming if we crashed early, headers aren't sent.
+                try:
+                    self.send_response(500)
+                    self.end_headers()
+                    self.wfile.write(f"Internal Server Error: {e}".encode('utf-8'))
+                except:
+                    pass
 
 def monitor_parent_process():
     """监控父进程，如果父进程退出则自动退出当前进程"""
