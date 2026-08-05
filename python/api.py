@@ -152,7 +152,10 @@ def handle_get_config(req):
         "email_port": str(Config.EMAIL_SMTP_PORT) if Config.EMAIL_SMTP_PORT else "465",
         "email_sender": Config.EMAIL_SENDER or "",
         "email_password": Config.EMAIL_PASSWORD or "",
-        "email_receiver": Config.EMAIL_RECEIVER or ""
+        "email_receiver": Config.EMAIL_RECEIVER or "",
+        "data_source": Config.DATA_SOURCE or "akshare",
+        "alert_poll_interval_minutes": Config.ALERT_POLL_INTERVAL_MINUTES,
+        "alert_trading_hours_only": Config.ALERT_TRADING_HOURS_ONLY,
     }
 
 
@@ -218,6 +221,12 @@ def handle_config_save(req):
             data.get('email_password', ''),
             data.get('email_receiver', '')
         )
+
+    Config.update_app_settings(
+        data.get('data_source', 'akshare'),
+        data.get('alert_poll_interval_minutes', 10),
+        data.get('alert_trading_hours_only', True)
+    )
 
     init_agent()
     return {"success": True, "path": Config.get_env_path()}

@@ -14,6 +14,9 @@ interface ConfigData {
     email_sender?: string
     email_password?: string
     email_receiver?: string
+    data_source?: 'akshare' | 'tushare'
+    alert_poll_interval_minutes?: number
+    alert_trading_hours_only?: boolean
 }
 
 declare interface Window {
