@@ -311,8 +311,11 @@ class RequestHandler(BaseHTTPRequestHandler):
             body = {}
             if method == 'POST':
                 length = int(self.headers.get('Content-Length', 0))
-                if length:
-                    body = json.loads(self.rfile.read(length).decode('utf-8'))
+                # 空 body 必须挡在 handler 之前：/config/save 拿到空字典会用一串
+                # 空字符串覆盖用户的 .env。字段全可选的端点也应显式发 {}。
+                if not length:
+                    raise ApiError(400, "Missing request body")
+                body = json.loads(self.rfile.read(length).decode('utf-8'))
             result = handler(ApiRequest(parsed.path, query, body))
             self._send_json(200, result)
         except ApiError as e:
