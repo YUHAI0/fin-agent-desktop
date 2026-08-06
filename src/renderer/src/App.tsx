@@ -3,6 +3,7 @@ import InputView from './components/InputView'
 import ChatView from './components/ChatView'
 import ConfigView from './components/ConfigView'
 import AboutView from './components/AboutView'
+import PortfolioView from './components/PortfolioView'
 import QuitConfirmModal from './components/QuitConfirmModal'
 import { useEffect, useState } from 'react'
 
@@ -51,6 +52,7 @@ function App(): JSX.Element {
         <Route path="/chat" element={<ChatView />} />
         <Route path="/config" element={<ConfigView />} />
         <Route path="/about" element={<AboutView />} />
+        <Route path="/portfolio" element={<PortfolioView />} />
         <Route path="/" element={<InputView />} /> {/* Default to input if no hash */}
       </Routes>
       <QuitConfirmModal
