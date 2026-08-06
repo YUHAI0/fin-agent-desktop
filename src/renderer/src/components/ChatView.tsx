@@ -689,6 +689,13 @@ const ChatView: React.FC = () => {
             <Bell size={18} />
           </button>
           <button
+            onClick={() => navigate('/portfolio')}
+            className="text-gray-400 hover:text-white transition-colors p-1 rounded hover:bg-gray-800"
+            title="投资组合"
+          >
+            投资组合
+          </button>
+          <button
             onClick={() => navigate('/config')}
             className="text-gray-400 hover:text-white transition-colors p-1 rounded hover:bg-gray-800"
             title="设置"
