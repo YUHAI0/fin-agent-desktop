@@ -35,7 +35,6 @@ declare interface Window {
     resetConversationContext: () => void
     openExternal: (url: string) => Promise<void>
     onFocusInput: (callback: () => void) => () => void
-    onClearChatHistory: (callback: () => void) => () => void
     onQuitConfirm: (callback: () => void) => () => void
     quitConfirmed: (confirmed: boolean) => void
     onNavigate: (callback: (route: string) => void) => void

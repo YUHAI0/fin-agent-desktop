@@ -356,7 +356,6 @@ function createTray() {
           if (!currentRequest) {
             // 请求已经被清除，直接退出
             console.log('[Main] Request already cleared, exiting directly from tray')
-            clearChatHistory()
             if (chatWindow) {
                 chatWindow.destroy()
                 chatWindow = null
@@ -384,7 +383,6 @@ function createTray() {
             if (!currentRequest) {
               // 请求已经被清除，直接退出
               console.log('[Main] Request cleared before showing dialog from tray, exiting directly')
-              clearChatHistory()
               if (chatWindow) {
                   chatWindow.destroy()
                   chatWindow = null
@@ -416,7 +414,6 @@ function createTray() {
             if (!currentRequest) {
               // 请求已经被清除，直接退出
               console.log('[Main] Request cleared during dialog from tray, exiting directly')
-              clearChatHistory()
               if (chatWindow) {
                   chatWindow.destroy()
                   chatWindow = null
@@ -443,8 +440,6 @@ function createTray() {
           }
         }
         
-        // 清空聊天历史
-        clearChatHistory()
         // 销毁窗口以确保 app.quit 能正常工作
         if (chatWindow) {
             chatWindow.destroy()
@@ -946,7 +941,7 @@ app.whenReady().then(() => {
     globalShortcut.unregisterAll()
   })
 
-  ipcMain.on('submit-input', async (_, text) => {
+  ipcMain.on('submit-input', async (_, text, sessionId?: string) => {
     console.log('[Main] Received submit-input:', text)
     
     // Check config before processing
@@ -986,7 +981,7 @@ app.whenReady().then(() => {
       try {
         console.log('[Main] Sending POST to http://127.0.0.1:5678/chat')
         
-        const postData = JSON.stringify({ message: text })
+        const postData = JSON.stringify({ message: text, session_id: sessionId })
         console.log('[Main] POST data:', postData)
         console.log('[Main] POST data length:', Buffer.byteLength(postData))
         
@@ -1216,6 +1211,38 @@ app.whenReady().then(() => {
     }
   })
 
+  ipcMain.handle('list-sessions', async (_e, offset: number, limit: number) => {
+    return makeApiRequest(`/sessions?offset=${offset ?? 0}&limit=${limit ?? 30}`)
+  })
+
+  ipcMain.handle('get-session', async (_e, id: string) => {
+    return makeApiRequest(`/sessions/detail?id=${encodeURIComponent(id)}`)
+  })
+
+  ipcMain.handle('create-session', async (_e, title?: string) => {
+    return makeApiRequest('/sessions/create', 'POST', { title })
+  })
+
+  ipcMain.handle('delete-session', async (_e, id: string) => {
+    return makeApiRequest('/sessions/delete', 'POST', { id })
+  })
+
+  ipcMain.handle('rename-session', async (_e, id: string, title: string) => {
+    return makeApiRequest('/sessions/rename', 'POST', { id, title })
+  })
+
+  ipcMain.handle('pin-session', async (_e, id: string, pinned: boolean) => {
+    return makeApiRequest('/sessions/pin', 'POST', { id, pinned })
+  })
+
+  ipcMain.handle('search-sessions', async (_e, keyword: string) => {
+    return makeApiRequest('/sessions/search', 'POST', { keyword })
+  })
+
+  ipcMain.handle('save-session-ui', async (_e, id: string, uiMessages: unknown[]) => {
+    return makeApiRequest('/sessions/ui', 'POST', { id, ui_messages: uiMessages })
+  })
+
   ipcMain.handle('get-auto-launch', () => {
     const settings = app.getLoginItemSettings()
     return settings.openAtLogin
@@ -1239,20 +1266,6 @@ app.whenReady().then(() => {
     }
   })
 })
-
-// 清空聊天历史
-function clearChatHistory() {
-  console.log('[Cleanup] Clearing chat history...')
-  const allWindows = BrowserWindow.getAllWindows()
-  allWindows.forEach(window => {
-    try {
-      window.webContents.send('clear-chat-history')
-      console.log('[Cleanup] Sent clear-chat-history to window')
-    } catch (err) {
-      console.error('[Cleanup] Failed to send clear-chat-history:', err)
-    }
-  })
-}
 
 // 终止 Python 进程的函数（带优雅关闭尝试）
 function killPythonProcess() {
@@ -1347,7 +1360,6 @@ async function stopActiveGeneration(): Promise<void> {
 }
 
 app.on('window-all-closed', () => {
-  clearChatHistory()
   killPythonProcess()
   if (process.platform !== 'darwin') {
     app.quit()
@@ -1364,7 +1376,6 @@ app.on('before-quit', async (event) => {
     if (!currentRequest) {
       // 请求已经被清除，直接退出
       console.log('[Main] Request already cleared, exiting directly')
-      clearChatHistory()
       killPythonProcess()
       return
     }
@@ -1387,7 +1398,6 @@ app.on('before-quit', async (event) => {
       if (!currentRequest) {
         // 请求已经被清除，直接退出
         console.log('[Main] Request cleared before showing dialog, exiting directly')
-        clearChatHistory()
         killPythonProcess()
         app.exit(0)
         return
@@ -1412,7 +1422,6 @@ app.on('before-quit', async (event) => {
       if (!currentRequest) {
         // 请求已经被清除，直接退出
         console.log('[Main] Request cleared during dialog, exiting directly')
-        clearChatHistory()
         killPythonProcess()
         app.exit(0)
         return
@@ -1421,7 +1430,6 @@ app.on('before-quit', async (event) => {
       if (confirmed) {
         // 用户选择继续退出，停止生成并退出
         await stopActiveGeneration()
-        clearChatHistory()
         killPythonProcess()
         app.exit(0)
       } else {
@@ -1431,13 +1439,11 @@ app.on('before-quit', async (event) => {
     } else {
       // 没有聊天窗口，直接退出
       await stopActiveGeneration()
-      clearChatHistory()
       killPythonProcess()
       app.exit(0)
     }
   } else {
     // 没有正在进行的生成，正常退出
-    clearChatHistory()
     killPythonProcess()
   }
 })
@@ -1452,7 +1458,6 @@ ipcMain.on('quit-confirmed', (_, confirmed: boolean) => {
 })
 
 app.on('will-quit', () => {
-  clearChatHistory()
   killPythonProcess()
 })
 
@@ -1463,14 +1468,12 @@ process.on('exit', () => {
 
 process.on('SIGINT', () => {
   console.log('[Cleanup] Received SIGINT')
-  clearChatHistory()
   killPythonProcess()
   app.quit()
 })
 
 process.on('SIGTERM', () => {
   console.log('[Cleanup] Received SIGTERM')
-  clearChatHistory()
   killPythonProcess()
   app.quit()
 })

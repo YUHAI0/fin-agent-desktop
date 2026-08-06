@@ -27,7 +27,6 @@ const onNewMessageBridge = createChannelBridge<string>('new-message')
 const onBotResponseBridge = createChannelBridge<any>('bot-response')
 const onBotStreamBridge = createChannelBridge<any>('bot-stream')
 const onFocusInputBridge = createChannelBridge<void>('focus-input')
-const onClearChatHistoryBridge = createChannelBridge<void>('clear-chat-history')
 const onQuitConfirmBridge = createChannelBridge<void>('quit-confirm')
 
 // Custom APIs for renderer
@@ -49,7 +48,6 @@ const api = {
   onBotResponse: (callback: (data: any) => void) => onBotResponseBridge(callback),
   onBotStream: (callback: (data: any) => void) => onBotStreamBridge(callback),
   onFocusInput: (callback: () => void) => onFocusInputBridge(callback),
-  onClearChatHistory: (callback: () => void) => onClearChatHistoryBridge(callback),
   onQuitConfirm: (callback: () => void) => onQuitConfirmBridge(callback),
   quitConfirmed: (confirmed: boolean) => ipcRenderer.send('quit-confirmed', confirmed),
   suspendShortcut: () => ipcRenderer.invoke('suspend-shortcut'),
