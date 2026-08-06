@@ -208,6 +208,16 @@ def main():
     
     paths_arg = str(FIN_AGENT_DIR)
     
+    excluded_modules = [
+        "tkinter",
+        "PyQt5",
+        "PySide2",
+        "notebook",
+        "IPython",
+        "pytest",
+        "sphinx",
+    ]
+
     pyinstaller_cmd = [
         sys.executable, "-m", "PyInstaller",
         "--noconfirm",
@@ -217,10 +227,13 @@ def main():
         "--name", "api",
         "--paths", paths_arg,
         "--hidden-import", "fin_agent",
+        "--hidden-import", "akshare",
         "--distpath", str(py_dist),
         "--workpath", str(py_work),
-        str(PYTHON_DIR / "api.py")
     ]
+    for module in excluded_modules:
+        pyinstaller_cmd.extend(["--exclude-module", module])
+    pyinstaller_cmd.append(str(PYTHON_DIR / "api.py"))
     
     log(f"执行 PyInstaller...")
     # 使用 subprocess.run 直接执行列表命令，避免 shell=True 的转义问题
