@@ -126,6 +126,49 @@ def build_session_agent(session_id):
         agent_instance.history = history
     return agent_instance
 
+TITLE_PROMPT = (
+    "请用不超过 12 个汉字概括下面这句用户提问的主题，只输出标题本身，"
+    "不要引号、不要标点、不要解释。\n\n用户提问：{question}"
+)
+
+
+def _fallback_title(user_input):
+    text = (user_input or "").strip().replace("\n", " ")
+    return text[:20] or session_store.DEFAULT_TITLE
+
+
+def maybe_generate_title(session_id, user_input):
+    """首轮对话结束后生成标题。仅在标题仍为默认值时执行。"""
+    def worker():
+        try:
+            listing = session_store.list_sessions(offset=0, limit=500)
+            entry = next((e for e in listing["sessions"] if e["id"] == session_id), None)
+            if entry is None or entry.get("title") != session_store.DEFAULT_TITLE:
+                return
+
+            title = _fallback_title(user_input)
+            try:
+                from fin_agent.llm.factory import LLMFactory
+                llm = LLMFactory.create_llm()
+                # chat(stream=False) 返回 response.choices[0].message 对象，取 .content
+                message = llm.chat(
+                    [{"role": "user", "content": TITLE_PROMPT.format(question=user_input)}],
+                    stream=False,
+                )
+                candidate = (getattr(message, "content", "") or "").strip().strip('"').strip("'").replace("\n", "")
+                if candidate:
+                    title = candidate[:20]
+            except Exception as e:
+                sys.stderr.write(f"[Title] LLM summarize failed, fallback to truncation: {e}\n")
+                sys.stderr.flush()
+
+            session_store.rename_session(session_id, title)
+        except Exception as e:
+            sys.stderr.write(f"[Title] Failed to set session title: {e}\n")
+            sys.stderr.flush()
+
+    threading.Thread(target=worker, daemon=True).start()
+
 class ApiError(Exception):
     """handler 抛出此异常以返回非 200 响应。"""
     def __init__(self, status, message):
@@ -515,6 +558,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     except Exception as e:
                         sys.stderr.write(f"[Session] Failed to save history: {e}\n")
                         sys.stderr.flush()
+                    maybe_generate_title(session_id, user_input)
                     
                 # debug_print("Sent [DONE] signal", file=sys.stderr)
                     
