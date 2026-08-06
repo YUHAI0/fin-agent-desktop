@@ -29,6 +29,15 @@ const onBotStreamBridge = createChannelBridge<any>('bot-stream')
 const onFocusInputBridge = createChannelBridge<void>('focus-input')
 const onQuitConfirmBridge = createChannelBridge<void>('quit-confirm')
 
+type PositionPayload = {
+  id?: string
+  ts_code: string
+  amount: number
+  cost: number
+  bought_at?: string
+  note?: string
+}
+
 // Custom APIs for renderer
 const api = {
   submitInput: (text: string, sessionId?: string) => ipcRenderer.send('submit-input', text, sessionId),
@@ -65,7 +74,15 @@ const api = {
   renameSession: (id: string, title: string) => ipcRenderer.invoke('rename-session', id, title),
   pinSession: (id: string, pinned: boolean) => ipcRenderer.invoke('pin-session', id, pinned),
   searchSessions: (keyword: string) => ipcRenderer.invoke('search-sessions', keyword),
-  saveSessionUi: (id: string, uiMessages: unknown[]) => ipcRenderer.invoke('save-session-ui', id, uiMessages)
+  saveSessionUi: (id: string, uiMessages: unknown[]) => ipcRenderer.invoke('save-session-ui', id, uiMessages),
+  listPortfolios: () => ipcRenderer.invoke('list-portfolios'),
+  getPortfolioDetail: (id?: string) => ipcRenderer.invoke('get-portfolio-detail', id),
+  createPortfolio: (name: string) => ipcRenderer.invoke('create-portfolio', name),
+  renamePortfolio: (id: string, name: string) => ipcRenderer.invoke('rename-portfolio', id, name),
+  deletePortfolio: (id: string) => ipcRenderer.invoke('delete-portfolio', id),
+  addPosition: (payload: PositionPayload) => ipcRenderer.invoke('add-position', payload),
+  updatePosition: (payload: PositionPayload) => ipcRenderer.invoke('update-position', payload),
+  deletePosition: (id: string | undefined, tsCode: string) => ipcRenderer.invoke('delete-position', id, tsCode)
 }
 
 if (process.contextIsolated) {

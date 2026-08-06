@@ -35,6 +35,46 @@ interface SessionBody {
   ui_messages: unknown[]
 }
 
+interface PortfolioMeta {
+  id: string
+  name: string
+  created_at: string
+  position_count: number
+}
+
+interface PortfolioPosition {
+  ts_code: string
+  name: string
+  amount: number
+  cost: number
+  current_price: number
+  estimated: boolean
+  market_value: number
+  pnl: number
+  pnl_pct: number
+  bought_at: string
+  note: string
+}
+
+interface PortfolioDetail {
+  portfolio_id: string
+  portfolio_name: string
+  positions: PortfolioPosition[]
+  total_market_value: number
+  total_cost_value: number
+  total_pnl: number
+  total_pnl_pct: number
+}
+
+interface PositionPayload {
+  id?: string
+  ts_code: string
+  amount: number
+  cost: number
+  bought_at?: string
+  note?: string
+}
+
 declare interface Window {
   api: {
     submitInput: (text: string, sessionId?: string) => void
@@ -74,5 +114,13 @@ declare interface Window {
     pinSession: (id: string, pinned: boolean) => Promise<{ success: boolean }>
     searchSessions: (keyword: string) => Promise<{ sessions: SessionMeta[]; truncated: boolean }>
     saveSessionUi: (id: string, uiMessages: unknown[]) => Promise<{ success: boolean }>
+    listPortfolios: () => Promise<{ active_portfolio_id: string; portfolios: PortfolioMeta[] }>
+    getPortfolioDetail: (id?: string) => Promise<PortfolioDetail>
+    createPortfolio: (name: string) => Promise<{ success: boolean; id?: string; error?: string }>
+    renamePortfolio: (id: string, name: string) => Promise<{ success: boolean; error?: string }>
+    deletePortfolio: (id: string) => Promise<{ success: boolean; error?: string }>
+    addPosition: (payload: PositionPayload) => Promise<{ success: boolean; error?: string }>
+    updatePosition: (payload: PositionPayload) => Promise<{ success: boolean; error?: string }>
+    deletePosition: (id: string | undefined, tsCode: string) => Promise<{ success: boolean; error?: string }>
   }
 }

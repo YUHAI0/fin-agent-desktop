@@ -1260,6 +1260,36 @@ app.whenReady().then(() => {
     return makeApiRequest('/sessions/ui', 'POST', { id, ui_messages: uiMessages })
   })
 
+  ipcMain.handle('list-portfolios', async () => makeApiRequest('/portfolio/list'))
+
+  ipcMain.handle('get-portfolio-detail', async (_e, id?: string) =>
+    makeApiRequest(`/portfolio/detail${id ? `?id=${encodeURIComponent(id)}` : ''}`)
+  )
+
+  ipcMain.handle('create-portfolio', async (_e, name: string) =>
+    makeApiRequest('/portfolio/create', 'POST', { name })
+  )
+
+  ipcMain.handle('rename-portfolio', async (_e, id: string, name: string) =>
+    makeApiRequest('/portfolio/rename', 'POST', { id, name })
+  )
+
+  ipcMain.handle('delete-portfolio', async (_e, id: string) =>
+    makeApiRequest('/portfolio/delete', 'POST', { id })
+  )
+
+  ipcMain.handle('add-position', async (_e, payload: unknown) =>
+    makeApiRequest('/portfolio/position/add', 'POST', payload)
+  )
+
+  ipcMain.handle('update-position', async (_e, payload: unknown) =>
+    makeApiRequest('/portfolio/position/update', 'POST', payload)
+  )
+
+  ipcMain.handle('delete-position', async (_e, id: string | undefined, tsCode: string) =>
+    makeApiRequest('/portfolio/position/delete', 'POST', { id, ts_code: tsCode })
+  )
+
   ipcMain.handle('get-auto-launch', () => {
     const settings = app.getLoginItemSettings()
     return settings.openAtLogin
