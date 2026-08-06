@@ -64,6 +64,7 @@ try:
     from fin_agent.agent.core import FinAgent
     from fin_agent.config import Config
     from fin_agent.scheduler import TaskScheduler
+    from fin_agent import session_store
 except ImportError as e:
     print(f"Error importing fin_agent: {e}", file=sys.stderr)
     sys.exit(1)
@@ -242,6 +243,75 @@ def handle_scheduler_task_remove(req):
         raise ApiError(400, "missing task_id")
     scheduler = TaskScheduler()
     return {"success": True, "removed": scheduler.remove_task(task_id)}
+
+
+@route("GET", "/sessions")
+def handle_list_sessions(req):
+    try:
+        offset = int(req.query.get("offset", 0))
+        limit = int(req.query.get("limit", 30))
+    except ValueError:
+        raise ApiError(400, "offset/limit 必须为整数")
+    return session_store.list_sessions(offset=max(offset, 0), limit=min(max(limit, 1), 200))
+
+
+@route("GET", "/sessions/detail")
+def handle_session_detail(req):
+    session_id = req.query.get("id")
+    if not session_id:
+        raise ApiError(400, "missing id")
+    try:
+        return session_store.get_session(session_id)
+    except KeyError:
+        raise ApiError(404, "session not found")
+
+
+@route("POST", "/sessions/create")
+def handle_session_create(req):
+    return session_store.create_session(req.body.get("title") or session_store.DEFAULT_TITLE)
+
+
+@route("POST", "/sessions/delete")
+def handle_session_delete(req):
+    session_id = req.body.get("id")
+    if not session_id:
+        raise ApiError(400, "missing id")
+    return {"success": True, "deleted": session_store.delete_session(session_id)}
+
+
+@route("POST", "/sessions/rename")
+def handle_session_rename(req):
+    session_id = req.body.get("id")
+    title = req.body.get("title")
+    if not session_id or not title:
+        raise ApiError(400, "missing id or title")
+    if not session_store.rename_session(session_id, title):
+        raise ApiError(404, "session not found")
+    return {"success": True}
+
+
+@route("POST", "/sessions/pin")
+def handle_session_pin(req):
+    session_id = req.body.get("id")
+    if not session_id:
+        raise ApiError(400, "missing id")
+    if not session_store.set_pinned(session_id, bool(req.body.get("pinned"))):
+        raise ApiError(404, "session not found")
+    return {"success": True}
+
+
+@route("POST", "/sessions/search")
+def handle_session_search(req):
+    return session_store.search_sessions(req.body.get("keyword", ""))
+
+
+@route("POST", "/sessions/ui")
+def handle_session_save_ui(req):
+    session_id = req.body.get("id")
+    if not session_id:
+        raise ApiError(400, "missing id")
+    session_store.save_ui_messages(session_id, req.body.get("ui_messages") or [])
+    return {"success": True}
 
 
 class RequestHandler(BaseHTTPRequestHandler):
