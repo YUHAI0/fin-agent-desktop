@@ -1206,6 +1206,10 @@ app.whenReady().then(() => {
     return getVersion()
   })
 
+  ipcMain.handle('get-config-dir', () => {
+    return join(app.getPath('appData'), 'fin-agent')
+  })
+
   ipcMain.handle('list-scheduler-tasks', async () => {
     try {
       return await makeApiRequest('/scheduler/tasks')

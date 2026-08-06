@@ -41,6 +41,7 @@ declare interface Window {
     stopGeneration: (sessionId?: string) => void
     resizeInput: (height: number) => void
     getVersion: () => Promise<string>
+    getConfigDir: () => Promise<string>
     onNewMessage: (
       callback: (payload: { text: string; sessionId?: string } | string) => void
     ) => () => void

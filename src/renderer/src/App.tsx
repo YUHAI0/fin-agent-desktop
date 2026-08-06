@@ -2,6 +2,7 @@ import { Routes, Route, useNavigate } from 'react-router-dom'
 import InputView from './components/InputView'
 import ChatView from './components/ChatView'
 import ConfigView from './components/ConfigView'
+import AboutView from './components/AboutView'
 import QuitConfirmModal from './components/QuitConfirmModal'
 import { useEffect, useState } from 'react'
 
@@ -49,6 +50,7 @@ function App(): JSX.Element {
         <Route path="/input" element={<InputView />} />
         <Route path="/chat" element={<ChatView />} />
         <Route path="/config" element={<ConfigView />} />
+        <Route path="/about" element={<AboutView />} />
         <Route path="/" element={<InputView />} /> {/* Default to input if no hash */}
       </Routes>
       <QuitConfirmModal

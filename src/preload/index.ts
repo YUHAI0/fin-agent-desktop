@@ -35,6 +35,7 @@ const api = {
   stopGeneration: (sessionId?: string) => ipcRenderer.send('stop-generation', sessionId),
   resizeInput: (height: number) => ipcRenderer.send('resize-input', height),
   getVersion: () => ipcRenderer.invoke('get-version'),
+  getConfigDir: () => ipcRenderer.invoke('get-config-dir'),
   checkConfig: () => ipcRenderer.invoke('check-config'),
   getConfig: () => ipcRenderer.invoke('get-config'),
   saveConfig: (data: any) => ipcRenderer.invoke('save-config', data),
