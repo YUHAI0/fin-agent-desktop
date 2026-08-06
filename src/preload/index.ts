@@ -31,7 +31,7 @@ const onQuitConfirmBridge = createChannelBridge<void>('quit-confirm')
 
 // Custom APIs for renderer
 const api = {
-  submitInput: (text: string) => ipcRenderer.send('submit-input', text),
+  submitInput: (text: string, sessionId?: string) => ipcRenderer.send('submit-input', text, sessionId),
   stopGeneration: () => ipcRenderer.send('stop-generation'),
   resizeInput: (height: number) => ipcRenderer.send('resize-input', height),
   getVersion: () => ipcRenderer.invoke('get-version'),
@@ -56,7 +56,15 @@ const api = {
   getAutoLaunch: () => ipcRenderer.invoke('get-auto-launch'),
   setAutoLaunch: (enabled: boolean) => ipcRenderer.invoke('set-auto-launch', enabled),
   listSchedulerTasks: () => ipcRenderer.invoke('list-scheduler-tasks'),
-  removeSchedulerTask: (taskId: string) => ipcRenderer.invoke('remove-scheduler-task', taskId)
+  removeSchedulerTask: (taskId: string) => ipcRenderer.invoke('remove-scheduler-task', taskId),
+  listSessions: (offset: number, limit: number) => ipcRenderer.invoke('list-sessions', offset, limit),
+  getSession: (id: string) => ipcRenderer.invoke('get-session', id),
+  createSession: (title?: string) => ipcRenderer.invoke('create-session', title),
+  deleteSession: (id: string) => ipcRenderer.invoke('delete-session', id),
+  renameSession: (id: string, title: string) => ipcRenderer.invoke('rename-session', id, title),
+  pinSession: (id: string, pinned: boolean) => ipcRenderer.invoke('pin-session', id, pinned),
+  searchSessions: (keyword: string) => ipcRenderer.invoke('search-sessions', keyword),
+  saveSessionUi: (id: string, uiMessages: unknown[]) => ipcRenderer.invoke('save-session-ui', id, uiMessages)
 }
 
 if (process.contextIsolated) {

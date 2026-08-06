@@ -19,9 +19,25 @@ interface ConfigData {
     alert_trading_hours_only?: boolean
 }
 
+interface SessionMeta {
+  id: string
+  title: string
+  created_at: number
+  updated_at: number
+  pinned: boolean
+  message_count: number
+  preview: string
+}
+
+interface SessionBody {
+  id: string
+  llm_history: unknown[]
+  ui_messages: unknown[]
+}
+
 declare interface Window {
   api: {
-    submitInput: (text: string) => void
+    submitInput: (text: string, sessionId?: string) => void
     stopGeneration: () => void
     resizeInput: (height: number) => void
     getVersion: () => Promise<string>
@@ -47,5 +63,13 @@ declare interface Window {
     removeSchedulerTask: (
       taskId: string
     ) => Promise<{ success?: boolean; removed?: boolean; error?: string }>
+    listSessions: (offset: number, limit: number) => Promise<{ sessions: SessionMeta[]; total: number }>
+    getSession: (id: string) => Promise<SessionBody>
+    createSession: (title?: string) => Promise<SessionMeta>
+    deleteSession: (id: string) => Promise<{ success: boolean; deleted: boolean }>
+    renameSession: (id: string, title: string) => Promise<{ success: boolean }>
+    pinSession: (id: string, pinned: boolean) => Promise<{ success: boolean }>
+    searchSessions: (keyword: string) => Promise<{ sessions: SessionMeta[]; truncated: boolean }>
+    saveSessionUi: (id: string, uiMessages: unknown[]) => Promise<{ success: boolean }>
   }
 }
