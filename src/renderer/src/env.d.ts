@@ -38,10 +38,12 @@ interface SessionBody {
 declare interface Window {
   api: {
     submitInput: (text: string, sessionId?: string) => void
-    stopGeneration: () => void
+    stopGeneration: (sessionId?: string) => void
     resizeInput: (height: number) => void
     getVersion: () => Promise<string>
-    onNewMessage: (callback: (text: string) => void) => () => void
+    onNewMessage: (
+      callback: (payload: { text: string; sessionId?: string } | string) => void
+    ) => () => void
     onBotResponse: (callback: (data: any) => void) => () => void
     onBotStream: (callback: (data: any) => void) => () => void
     checkConfig: () => Promise<{ configured: boolean; message?: string }>

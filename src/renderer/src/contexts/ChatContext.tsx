@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react'
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react'
 import { createWelcomeAgentMessage } from '../utils/welcomeAgentMessage'
 
 export type ChatBlock =
@@ -24,9 +24,13 @@ export interface Message {
   logs?: string // Kept for legacy
 }
 
+type MessagesUpdater = React.SetStateAction<Message[]>
+
 interface ChatContextType {
   messages: Message[]
-  setMessages: React.Dispatch<React.SetStateAction<Message[]>>
+  setMessages: React.Dispatch<MessagesUpdater>
+  /** 按会话 id 更新消息（流式事件路由到非活动标签时用） */
+  updateSessionMessages: (sessionId: string, action: MessagesUpdater) => void
   addMessage: (message: Message) => void
   clearMessages: () => void
   openTabs: SessionMeta[]
@@ -73,10 +77,21 @@ function readOpenTabIds(): string[] {
   }
 }
 
+function resolveMessages(action: MessagesUpdater, current: Message[]): Message[] {
+  return typeof action === 'function' ? action(current) : action
+}
+
 export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [messages, setMessages] = useState<Message[]>([createWelcomeAgentMessage()])
+  const [messagesBySession, setMessagesBySession] = useState<Record<string, Message[]>>({})
   const [openTabs, setOpenTabs] = useState<SessionMeta[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
+  const messagesBySessionRef = useRef(messagesBySession)
+  messagesBySessionRef.current = messagesBySession
+
+  const messages =
+    activeSessionId && messagesBySession[activeSessionId]
+      ? messagesBySession[activeSessionId]
+      : [createWelcomeAgentMessage()]
 
   const refreshTabs = useCallback(async () => {
     const ids = readOpenTabIds()
@@ -93,17 +108,39 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     localStorage.setItem(OPEN_TABS_KEY, JSON.stringify(ids))
   }, [])
 
+  const updateSessionMessages = useCallback((sessionId: string, action: MessagesUpdater) => {
+    setMessagesBySession((prev) => {
+      const current = prev[sessionId] ?? [createWelcomeAgentMessage()]
+      return { ...prev, [sessionId]: resolveMessages(action, current) }
+    })
+  }, [])
+
+  const setMessages: React.Dispatch<MessagesUpdater> = useCallback(
+    (action) => {
+      if (!activeSessionId) return
+      updateSessionMessages(activeSessionId, action)
+    },
+    [activeSessionId, updateSessionMessages]
+  )
+
   const openSession = useCallback(
     async (id: string) => {
-      const body = await window.api.getSession(id)
-      const ui = (body.ui_messages as Message[]) || []
-      setMessages(ui.length > 0 ? ui : [createWelcomeAgentMessage()])
-      setActiveSessionId(id)
-
       const ids = readOpenTabIds()
       if (!ids.includes(id)) {
         persistOpenTabIds([...ids, id])
       }
+
+      // 内存中已有该会话（例如后台仍在流式生成）时，不要用磁盘旧快照覆盖
+      if (messagesBySessionRef.current[id] === undefined) {
+        const body = await window.api.getSession(id)
+        const ui = (body.ui_messages as Message[]) || []
+        setMessagesBySession((prev) => {
+          if (prev[id] !== undefined) return prev
+          return { ...prev, [id]: ui.length > 0 ? ui : [createWelcomeAgentMessage()] }
+        })
+      }
+
+      setActiveSessionId(id)
       await refreshTabs()
     },
     [persistOpenTabIds, refreshTabs]
@@ -118,6 +155,17 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     (id: string) => {
       const ids = readOpenTabIds().filter((x) => x !== id)
       persistOpenTabIds(ids)
+      const snapshot = messagesBySessionRef.current[id]
+      if (snapshot) {
+        void window.api.saveSessionUi(id, snapshot).catch((err) => {
+          console.error('[ChatContext] Failed to persist before close:', err)
+        })
+      }
+      setMessagesBySession((prev) => {
+        const next = { ...prev }
+        delete next[id]
+        return next
+      })
       void refreshTabs()
       if (activeSessionId === id) {
         if (ids.length > 0) {
@@ -130,17 +178,19 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     [activeSessionId, newSession, openSession, persistOpenTabIds, refreshTabs]
   )
 
-  // 自动持久化当前会话的渲染消息。流式输出期间 messages 变化极频繁，
-  // 用 800ms 防抖避免每个 chunk 都触发一次落盘。
+  // 所有内存中的会话消息防抖落盘（含后台流式标签）
   useEffect(() => {
-    if (!activeSessionId) return undefined
+    const entries = Object.entries(messagesBySession)
+    if (entries.length === 0) return undefined
     const timer = setTimeout(() => {
-      void window.api.saveSessionUi(activeSessionId, messages).catch((err) => {
-        console.error('[ChatContext] Failed to persist ui messages:', err)
-      })
+      for (const [id, msgs] of entries) {
+        void window.api.saveSessionUi(id, msgs).catch((err) => {
+          console.error('[ChatContext] Failed to persist ui messages:', err)
+        })
+      }
     }, 800)
     return () => clearTimeout(timer)
-  }, [messages, activeSessionId])
+  }, [messagesBySession])
 
   // 启动：迁移旧数据 → 恢复上次打开的标签 → 没有则新建
   useEffect(() => {
@@ -178,6 +228,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       value={{
         messages,
         setMessages,
+        updateSessionMessages,
         addMessage,
         clearMessages,
         openTabs,

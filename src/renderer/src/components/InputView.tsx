@@ -20,7 +20,7 @@ const InputView: React.FC = () => {
     const removeBotStreamListener = window.api.onBotStream((data: any) => {
         if (!data) return
         
-        // 标记AI正在响应
+        // 仅在无 sessionId（旧路径）或与当前无关时仍更新状态——快捷输入窗只看全局结束信号
         setIsResponding(prev => {
             if (!prev && (data.type === 'content' || data.type === 'answer' || data.type === 'thinking' || data.type === 'tool_call' || data.type === 'tool_call_chunk')) {
                 return true
@@ -33,7 +33,8 @@ const InputView: React.FC = () => {
     })
     
     // 监听新消息，标记AI开始响应
-    const removeNewMessageListener = window.api.onNewMessage((text: string) => {
+    const removeNewMessageListener = window.api.onNewMessage((payload) => {
+        const text = typeof payload === 'string' ? payload : payload?.text
         if (text) {
             setIsResponding(true)
         }

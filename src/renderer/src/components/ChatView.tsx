@@ -149,17 +149,32 @@ const markdownComponents = {
 
 const ChatView: React.FC = () => {
   const navigate = useNavigate()
-  const { messages, setMessages, activeSessionId } = useChat() // 使用 Context 中的消息历史
+  const { messages, setMessages, updateSessionMessages, activeSessionId } = useChat() // 使用 Context 中的消息历史
   const [input, setInput] = useState('')
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [isTyping, setIsTyping] = useState(false)
-  const [isResponding, setIsResponding] = useState(false) // 跟踪AI是否正在响应
+  const [respondingSessions, setRespondingSessions] = useState<Set<string>>(() => new Set())
   const [version, setVersion] = useState('...')
   const [autoScroll, setAutoScroll] = useState(true)
   const [reminderModalOpen, setReminderModalOpen] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const activeSessionIdRef = useRef(activeSessionId)
+  activeSessionIdRef.current = activeSessionId
+
+  const respondingKey = (sessionId?: string | null) => sessionId || activeSessionIdRef.current || '__default__'
+  const isResponding = respondingSessions.has(respondingKey(activeSessionId))
+
+  const markResponding = (sessionId: string | undefined, responding: boolean) => {
+    const key = respondingKey(sessionId)
+    setRespondingSessions((prev) => {
+      const next = new Set(prev)
+      if (responding) next.add(key)
+      else next.delete(key)
+      return next
+    })
+  }
 
   const scrollToBottom = () => {
     if (autoScroll) {
@@ -202,42 +217,67 @@ const ChatView: React.FC = () => {
   }, [])
 
   useEffect(() => {
-    const removeListener = window.api.onNewMessage((text) => {
-      console.log('[ChatView] Received new-message:', text)
+    const applyToSession = (sessionId: string | undefined, updater: (prev: Message[]) => Message[]) => {
+      if (sessionId) {
+        updateSessionMessages(sessionId, updater)
+      } else if (activeSessionIdRef.current) {
+        updateSessionMessages(activeSessionIdRef.current, updater)
+      } else {
+        setMessages(updater)
+      }
+    }
+
+    const isActiveSession = (sessionId?: string) =>
+      !sessionId || sessionId === activeSessionIdRef.current
+
+    const removeListener = window.api.onNewMessage((payload) => {
+      const text = typeof payload === 'string' ? payload : payload?.text
+      const sessionId = typeof payload === 'string' ? undefined : payload?.sessionId
+      console.log('[ChatView] Received new-message:', text, sessionId)
       if (text) {
-        setMessages(prev => [...prev, { role: 'user', content: text, blocks: [] }])
-        setIsTyping(true)
-        setIsResponding(true) // 用户发送消息后，AI开始响应
+        applyToSession(sessionId, (prev) => [...prev, { role: 'user', content: text, blocks: [] }])
+        markResponding(sessionId, true)
+        if (isActiveSession(sessionId)) {
+          setIsTyping(true)
+        }
         // Don't create assistant message yet - wait for first stream event
       }
     })
 
     const removeBotStreamListener = window.api.onBotStream((data: any) => {
         if (!data) return;
+        const eventSessionId: string | undefined = data.sessionId
 
         // tool_call_chunk / content 在流式下每秒可达数十上百次，逐条打日志会淹没控制台且无助于排错
         if (data.type !== 'tool_call_chunk' && data.type !== 'content') {
-            console.log('[ChatView] Received bot-stream event:', data.type)
+            console.log('[ChatView] Received bot-stream event:', data.type, eventSessionId)
         }
-        
-        // 标记AI正在响应（使用函数式更新避免闭包问题）
-        setIsResponding(prev => {
-            if (!prev && (data.type === 'content' || data.type === 'answer' || data.type === 'thinking' || data.type === 'tool_call' || data.type === 'tool_call_chunk')) {
-                return true
-            }
-            return prev
-        })
-        
-        // Hide typing indicator as soon as we receive any content from AI
-        if (data.type === 'content' || data.type === 'answer') {
-            console.log('[ChatView] Received content/answer, hiding typing indicator')
-            setIsTyping(false)
-        } else if (data.type === 'error' || data.type === 'finish') {
-            console.log('[ChatView] Received error/finish, hiding typing indicator')
-            setIsTyping(false)
-            setIsResponding(false) // AI响应结束
+
+        if (
+          data.type === 'content' ||
+          data.type === 'answer' ||
+          data.type === 'thinking' ||
+          data.type === 'tool_call' ||
+          data.type === 'tool_call_chunk'
+        ) {
+          markResponding(eventSessionId, true)
         }
-        
+
+        // 仅活动会话更新输入区 typing 指示
+        if (isActiveSession(eventSessionId)) {
+          if (data.type === 'content' || data.type === 'answer') {
+              console.log('[ChatView] Received content/answer, hiding typing indicator')
+              setIsTyping(false)
+          } else if (data.type === 'error' || data.type === 'finish') {
+              console.log('[ChatView] Received error/finish, hiding typing indicator')
+              setIsTyping(false)
+          }
+        }
+
+        if (data.type === 'error' || data.type === 'finish') {
+          markResponding(eventSessionId, false)
+        }
+
         const patchFromStream = (prev: Message[]) => {
             const newMessages = [...prev]
             const lastIdx0 = newMessages.length - 1
@@ -545,9 +585,9 @@ const ChatView: React.FC = () => {
 
         // tool_result / finish 需尽快反映到 UI，避免批处理或收尾时卡片仍转圈
         if (data.type === 'tool_result' || data.type === 'finish') {
-            flushSync(() => setMessages(patchFromStream))
+            flushSync(() => applyToSession(eventSessionId, patchFromStream))
         } else {
-            setMessages(patchFromStream)
+            applyToSession(eventSessionId, patchFromStream)
         }
     })
 
@@ -576,7 +616,7 @@ const ChatView: React.FC = () => {
       removeBotStreamListener()
       removeFocusListener()
     }
-  }, [])
+  }, [setMessages, updateSessionMessages])
 
   const sendUserText = async (text: string) => {
     const trimmed = text.trim()
@@ -596,7 +636,7 @@ const ChatView: React.FC = () => {
 
     window.api.submitInput(trimmed, activeSessionId ?? undefined)
     setInput('')
-    setIsResponding(true)
+    markResponding(activeSessionId ?? undefined, true)
     setTimeout(() => {
       inputRef.current?.focus()
       setAutoScroll(true)
@@ -610,8 +650,8 @@ const ChatView: React.FC = () => {
 
     if (isResponding) {
       console.log('[ChatView] Stopping generation...')
-      window.api.stopGeneration()
-      setIsResponding(false)
+      window.api.stopGeneration(activeSessionId ?? undefined)
+      markResponding(activeSessionId ?? undefined, false)
       return
     }
 

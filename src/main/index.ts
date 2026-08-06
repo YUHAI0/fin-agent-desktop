@@ -53,8 +53,12 @@ let tray: Tray | null = null
 let pyProc: ChildProcess | null = null
 let hasConversationContext = false  // 跟踪是否有对话上下文
 let isCleaningUp = false  // 防止重复执行清理
-let currentRequest: http.ClientRequest | null = null  // 保存当前正在进行的 HTTP 请求
-let isUserStopped = false  // 标记是否是用户主动停止
+const activeRequests = new Map<string, http.ClientRequest>()  // sessionKey -> 进行中的 HTTP 请求
+const userStoppedKeys = new Set<string>()  // 用户主动停止的请求 key
+
+function streamRequestKey(sessionId?: string | null): string {
+  return sessionId || '__default__'
+}
 let serverReady = false
 let serverReadyResolve: (() => void) | null = null
 const serverReadyPromise = new Promise<void>((resolve) => {
@@ -353,7 +357,7 @@ function createTray() {
         // 检查是否有正在进行的生成
         if (hasActiveGeneration()) {
           // 再次检查，确保请求真的还在进行
-          if (!currentRequest) {
+          if (!hasActiveGeneration()) {
             // 请求已经被清除，直接退出
             console.log('[Main] Request already cleared, exiting directly from tray')
             if (chatWindow) {
@@ -380,7 +384,7 @@ function createTray() {
             }
             
             // 最后一次检查，确保请求还在进行
-            if (!currentRequest) {
+            if (!hasActiveGeneration()) {
               // 请求已经被清除，直接退出
               console.log('[Main] Request cleared before showing dialog from tray, exiting directly')
               if (chatWindow) {
@@ -411,7 +415,7 @@ function createTray() {
             })
             
             // 用户响应后，再次检查请求是否还在进行
-            if (!currentRequest) {
+            if (!hasActiveGeneration()) {
               // 请求已经被清除，直接退出
               console.log('[Main] Request cleared during dialog from tray, exiting directly')
               if (chatWindow) {
@@ -976,15 +980,22 @@ app.whenReady().then(() => {
     if (chatWindow) {
       chatWindow.show()
       chatWindow.focus()
-      chatWindow.webContents.send('new-message', text)
-      
+      chatWindow.webContents.send('new-message', { text, sessionId })
+
+      const reqKey = streamRequestKey(sessionId)
+      const tagStream = (payload: Record<string, unknown>) => {
+        if (chatWindow) {
+          chatWindow.webContents.send('bot-stream', { ...payload, sessionId })
+        }
+      }
+
       try {
         console.log('[Main] Sending POST to http://127.0.0.1:5678/chat')
-        
+
         const postData = JSON.stringify({ message: text, session_id: sessionId })
         console.log('[Main] POST data:', postData)
         console.log('[Main] POST data length:', Buffer.byteLength(postData))
-        
+
         const options: http.RequestOptions = {
           hostname: '127.0.0.1',
           port: 5678,
@@ -998,8 +1009,10 @@ app.whenReady().then(() => {
           // No timeout - streaming responses can take as long as needed
           timeout: 0
         }
-        
+
         console.log('[Main] Request options:', JSON.stringify(options, null, 2))
+
+        let req: http.ClientRequest
 
         const flushEvent = (eventText: string) => {
           // Normalize newlines
@@ -1024,42 +1037,40 @@ app.whenReady().then(() => {
           for (const value of dataPayloads) {
             if (value === '[DONE]') {
               console.log('[Main] Received [DONE], sending finish event to renderer')
-              currentRequest = null
-              if (chatWindow) {
-                chatWindow.webContents.send('bot-stream', { type: 'finish' })
-                console.log('[Main] Finish event sent to renderer')
+              if (activeRequests.get(reqKey) === req) {
+                activeRequests.delete(reqKey)
               }
+              tagStream({ type: 'finish' })
+              console.log('[Main] Finish event sent to renderer')
               continue
             }
 
             try {
               const data = JSON.parse(value)
-              if (chatWindow) {
-                chatWindow.webContents.send('bot-stream', data)
-              }
+              tagStream(data)
             } catch (e) {
               console.error('Error parsing SSE data line:', e, value)
             }
           }
         }
 
-        const req = http.request(options, (res) => {
+        req = http.request(options, (res) => {
           console.log('[Main] Response status:', res.statusCode)
           console.log('[Main] Response headers:', JSON.stringify(res.headers, null, 2))
 
           if (res.statusCode !== 200) {
             console.error('[Main] Non-200 status code received')
-            currentRequest = null  // 清除请求引用
+            if (activeRequests.get(reqKey) === req) {
+              activeRequests.delete(reqKey)
+            }
             throw new Error(`HTTP error! status: ${res.statusCode}`)
           }
 
           let buffer = ''
 
           res.setEncoding('utf8')
-          
+
           res.on('data', (chunk: string) => {
-            // console.log('[Main] Received data chunk, length:', chunk.length)
-            // console.log('[Main] Chunk content:', chunk.substring(0, 200))
             buffer += chunk
             // Handle CRLF just in case
             buffer = buffer.replace(/\r\n/g, '\n')
@@ -1078,36 +1089,36 @@ app.whenReady().then(() => {
               flushEvent(buffer)
             }
             console.log('[Main] Response stream ended')
-            // 清除请求引用（如果还没有清除的话，可能在收到 [DONE] 时已经清除了）
-            if (currentRequest === req) {
-              currentRequest = null
+            if (activeRequests.get(reqKey) === req) {
+              activeRequests.delete(reqKey)
             }
-            isUserStopped = false  // 重置标志
+            userStoppedKeys.delete(reqKey)
           })
 
           res.on('error', (err) => {
-            currentRequest = null  // 清除请求引用
-            // 如果是用户主动停止，静默处理，不打印任何日志
-            if (!isUserStopped) {
-              console.error('[Main] Response stream error:', err)
-              if (chatWindow) {
-                chatWindow.webContents.send('bot-stream', { type: 'error', content: `Stream error: ${err.message}` })
-              }
+            if (activeRequests.get(reqKey) === req) {
+              activeRequests.delete(reqKey)
             }
-            // 用户主动停止时，静默处理，不打印任何日志
-            isUserStopped = false  // 重置标志
+            // 如果是用户主动停止，静默处理，不打印任何日志
+            if (!userStoppedKeys.has(reqKey)) {
+              console.error('[Main] Response stream error:', err)
+              tagStream({ type: 'error', content: `Stream error: ${err.message}` })
+            }
+            userStoppedKeys.delete(reqKey)
           })
         })
-        
-        // 保存当前请求引用
-        currentRequest = req
+
+        // 按会话保存请求引用，支持多标签并行
+        activeRequests.set(reqKey, req)
 
         req.on('error', (err: any) => {
-          currentRequest = null  // 清除请求引用
+          if (activeRequests.get(reqKey) === req) {
+            activeRequests.delete(reqKey)
+          }
           // ECONNRESET 和 EPIPE 是正常的，当进程关闭时连接会断开
           if (err.code === 'ECONNRESET' || err.code === 'EPIPE') {
             // 如果是用户主动停止，不打印日志
-            if (!isUserStopped) {
+            if (!userStoppedKeys.has(reqKey)) {
               console.log('[Main] Request connection closed (process terminated)')
             }
           } else if (err.code === 'ECONNABORTED' || err.message === 'aborted' || err.message?.includes('aborted')) {
@@ -1115,18 +1126,16 @@ app.whenReady().then(() => {
             // 静默处理，不打印任何日志
           } else {
             // 如果是用户主动停止，不显示错误
-            if (!isUserStopped) {
+            if (!userStoppedKeys.has(reqKey)) {
               console.error('[Main] Request error:', err)
               console.error('[Main] Error code:', err.code)
               console.error('[Main] Error stack:', err.stack)
-              if (chatWindow) {
-                chatWindow.webContents.send('bot-stream', { type: 'error', content: `Request error: ${err.message}` })
-              }
+              tagStream({ type: 'error', content: `Request error: ${err.message}` })
             }
           }
-          isUserStopped = false  // 重置标志
+          userStoppedKeys.delete(reqKey)
         })
-        
+
         req.on('socket', (socket) => {
           console.log('[Main] Socket assigned')
           socket.on('connect', () => {
@@ -1155,33 +1164,37 @@ app.whenReady().then(() => {
       } catch (err) {
         console.error('[Main] API Error:', err)
         console.error('[Main] Error stack:', (err as Error).stack)
-        currentRequest = null  // 清除请求引用
-        if (chatWindow) {
-          chatWindow.webContents.send('bot-stream', { type: 'error', content: `Error: ${err}` })
-        }
+        activeRequests.delete(reqKey)
+        tagStream({ type: 'error', content: `Error: ${err}` })
       }
     }
   })
-  
-  // 停止生成处理器
-  ipcMain.on('stop-generation', () => {
-    console.log('[Main] Received stop-generation request')
-    if (currentRequest) {
-      console.log('[Main] Aborting current request...')
-      isUserStopped = true  // 标记为用户主动停止
-      currentRequest.destroy()  // 销毁请求，这会触发连接关闭
-      currentRequest = null
-      
-      // 通知前端生成已停止
+
+  // 停止生成处理器（可按 sessionId 停止单个会话的流）
+  ipcMain.on('stop-generation', (_e, sessionId?: string) => {
+    console.log('[Main] Received stop-generation request', sessionId)
+    const keys = sessionId
+      ? [streamRequestKey(sessionId)]
+      : [...activeRequests.keys()]
+    let stopped = false
+    for (const key of keys) {
+      const active = activeRequests.get(key)
+      if (!active) continue
+      console.log('[Main] Aborting request:', key)
+      userStoppedKeys.add(key)
+      active.destroy()
+      activeRequests.delete(key)
       if (chatWindow) {
-        chatWindow.webContents.send('bot-stream', { type: 'finish' })
-        console.log('[Main] Sent finish event to renderer after stop')
+        const sid = key === '__default__' ? undefined : key
+        chatWindow.webContents.send('bot-stream', { type: 'finish', sessionId: sid })
       }
-    } else {
+      stopped = true
+    }
+    if (!stopped) {
       console.log('[Main] No active request to stop')
     }
   })
-  
+
   ipcMain.on('resize-input', (_, height) => {
       if(inputWindow) {
           const [width] = inputWindow.getSize()
@@ -1338,25 +1351,27 @@ function killPythonProcess() {
 
 // 检查是否有正在进行的生成
 function hasActiveGeneration(): boolean {
-  return currentRequest !== null
+  return activeRequests.size > 0
 }
 
 // 停止当前正在进行的生成
 async function stopActiveGeneration(): Promise<void> {
-  if (currentRequest) {
-    console.log('[Main] Stopping active generation before quit...')
-    isUserStopped = true
-    currentRequest.destroy()
-    currentRequest = null
-    
-    // 通知前端生成已停止
-    if (chatWindow) {
-      chatWindow.webContents.send('bot-stream', { type: 'finish' })
+  if (activeRequests.size === 0) return
+  console.log('[Main] Stopping active generation before quit...')
+  const keys = [...activeRequests.keys()]
+  for (const key of keys) {
+    userStoppedKeys.add(key)
+    const req = activeRequests.get(key)
+    if (req) {
+      req.destroy()
     }
-    
-    // 等待一小段时间确保请求已完全停止
-    await new Promise(resolve => setTimeout(resolve, 100))
+    activeRequests.delete(key)
+    if (chatWindow) {
+      const sessionId = key === '__default__' ? undefined : key
+      chatWindow.webContents.send('bot-stream', { type: 'finish', sessionId })
+    }
   }
+  await new Promise(resolve => setTimeout(resolve, 100))
 }
 
 app.on('window-all-closed', () => {
@@ -1373,7 +1388,7 @@ app.on('before-quit', async (event) => {
   // 检查是否有正在进行的生成
   if (hasActiveGeneration()) {
     // 再次检查，确保请求真的还在进行（防止竞态条件）
-    if (!currentRequest) {
+    if (!hasActiveGeneration()) {
       // 请求已经被清除，直接退出
       console.log('[Main] Request already cleared, exiting directly')
       killPythonProcess()
@@ -1395,7 +1410,7 @@ app.on('before-quit', async (event) => {
       }
       
       // 最后一次检查，确保请求还在进行
-      if (!currentRequest) {
+      if (!hasActiveGeneration()) {
         // 请求已经被清除，直接退出
         console.log('[Main] Request cleared before showing dialog, exiting directly')
         killPythonProcess()
@@ -1419,7 +1434,7 @@ app.on('before-quit', async (event) => {
       })
       
       // 用户响应后，再次检查请求是否还在进行
-      if (!currentRequest) {
+      if (!hasActiveGeneration()) {
         // 请求已经被清除，直接退出
         console.log('[Main] Request cleared during dialog, exiting directly')
         killPythonProcess()

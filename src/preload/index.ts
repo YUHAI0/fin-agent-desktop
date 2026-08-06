@@ -23,7 +23,7 @@ function createChannelBridge<T>(channel: string) {
   }
 }
 
-const onNewMessageBridge = createChannelBridge<string>('new-message')
+const onNewMessageBridge = createChannelBridge<{ text: string; sessionId?: string } | string>('new-message')
 const onBotResponseBridge = createChannelBridge<any>('bot-response')
 const onBotStreamBridge = createChannelBridge<any>('bot-stream')
 const onFocusInputBridge = createChannelBridge<void>('focus-input')
@@ -32,7 +32,7 @@ const onQuitConfirmBridge = createChannelBridge<void>('quit-confirm')
 // Custom APIs for renderer
 const api = {
   submitInput: (text: string, sessionId?: string) => ipcRenderer.send('submit-input', text, sessionId),
-  stopGeneration: () => ipcRenderer.send('stop-generation'),
+  stopGeneration: (sessionId?: string) => ipcRenderer.send('stop-generation', sessionId),
   resizeInput: (height: number) => ipcRenderer.send('resize-input', height),
   getVersion: () => ipcRenderer.invoke('get-version'),
   checkConfig: () => ipcRenderer.invoke('check-config'),
