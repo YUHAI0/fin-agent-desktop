@@ -228,6 +228,9 @@ def handle_config_save(req):
         data.get('alert_trading_hours_only', True)
     )
 
+    from fin_agent.datasources import reset_provider_cache
+    reset_provider_cache()
+
     init_agent()
     return {"success": True, "path": Config.get_env_path()}
 
