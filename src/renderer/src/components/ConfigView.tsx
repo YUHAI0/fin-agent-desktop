@@ -13,6 +13,7 @@ const PROVIDER_PRESETS: Record<string, { label: string; baseUrl: string; model: 
 
 const ConfigView: React.FC = () => {
   const navigate = useNavigate()
+  const [dataSource, setDataSource] = useState<'akshare' | 'tushare'>('akshare')
   const [tushareToken, setTushareToken] = useState('')
   const [provider, setProvider] = useState('deepseek')
   const [deepseekKey, setDeepseekKey] = useState('')
@@ -48,6 +49,7 @@ const ConfigView: React.FC = () => {
       try {
         const config = await window.api.getConfig()
         if (config) {
+          setDataSource(config.data_source || 'akshare')
           setTushareToken(config.tushare_token || '')
           setProvider(config.provider || 'deepseek')
           setDeepseekKey(config.deepseek_key || '')
@@ -79,6 +81,7 @@ const ConfigView: React.FC = () => {
 
     try {
       const config = {
+        data_source: dataSource,
         tushare_token: tushareToken,
         provider,
         deepseek_key: deepseekKey,
@@ -196,6 +199,20 @@ const ConfigView: React.FC = () => {
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="space-y-2">
+            <label className="block text-sm font-medium text-gray-300">行情数据源</label>
+            <select
+              value={dataSource}
+              onChange={(e) => setDataSource(e.target.value as 'akshare' | 'tushare')}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
+            >
+              <option value="akshare">akshare（免费，推荐）</option>
+              <option value="tushare">tushare（需 Token）</option>
+            </select>
+            <p className="text-xs text-gray-500">
+              akshare 无需注册即可使用，覆盖 A 股基础信息、日线、实时行情、每日指标、利润表与指数行情。
+            </p>
+          </div>
+          <div className="space-y-2">
             <div className="flex items-center gap-2">
               <label className="block text-sm font-medium text-gray-300">Tushare Token</label>
               <button
@@ -213,9 +230,11 @@ const ConfigView: React.FC = () => {
               value={tushareToken}
               onChange={(e) => setTushareToken(e.target.value)}
               className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
-              placeholder="输入 Tushare Token"
-              required
+              placeholder="选填，输入 Tushare Token"
             />
+            <p className="text-xs text-gray-500">
+              选填。填写后可解锁选股筛选、港美股、ETF、可转债、期货与宏观数据等增强功能；即便数据源选择 akshare，此处的 Token 依然生效。
+            </p>
           </div>
 
           <div className="space-y-2">
