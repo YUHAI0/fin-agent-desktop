@@ -29,6 +29,8 @@ const ConfigView: React.FC = () => {
   const [emailPassword, setEmailPassword] = useState('')
   const [emailReceiver, setEmailReceiver] = useState('')
   const [autoLaunch, setAutoLaunch] = useState(false)
+  const [alertInterval, setAlertInterval] = useState('10')
+  const [tradingHoursOnly, setTradingHoursOnly] = useState(true)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [shortcutStatus, setShortcutStatus] = useState<{valid: boolean, message: string} | null>(null)
@@ -64,6 +66,8 @@ const ConfigView: React.FC = () => {
           setEmailSender(config.email_sender || '')
           setEmailPassword(config.email_password || '')
           setEmailReceiver(config.email_receiver || '')
+          setAlertInterval(String(config.alert_poll_interval_minutes ?? 10))
+          setTradingHoursOnly(config.alert_trading_hours_only ?? true)
         }
         const isAutoLaunch = await window.api.getAutoLaunch()
         setAutoLaunch(isAutoLaunch)
@@ -95,7 +99,9 @@ const ConfigView: React.FC = () => {
         email_port: emailPort,
         email_sender: emailSender,
         email_password: emailPassword,
-        email_receiver: emailReceiver
+        email_receiver: emailReceiver,
+        alert_poll_interval_minutes: Math.min(Math.max(Number(alertInterval) || 10, 1), 120),
+        alert_trading_hours_only: tradingHoursOnly
       }
 
       const result = await window.api.saveConfig(config)
@@ -396,6 +402,34 @@ const ConfigView: React.FC = () => {
                   className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${autoLaunch ? 'bg-blue-600' : 'bg-gray-600'}`}
                 >
                   <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${autoLaunch ? 'translate-x-6' : 'translate-x-1'}`} />
+                </button>
+             </div>
+             <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-300">价格提醒轮询间隔（分钟）</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={120}
+                  value={alertInterval}
+                  onChange={(e) => setAlertInterval(e.target.value)}
+                  onBlur={() => setAlertInterval(String(Math.min(Math.max(Number(alertInterval) || 10, 1), 120)))}
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+                <p className="text-xs text-gray-500">取值范围 1–120 分钟。修改后下一个轮询周期自动生效，无需重启。</p>
+             </div>
+             <div className="flex items-center justify-between py-2">
+                <div>
+                  <label className="block text-sm font-medium text-gray-300">仅在交易时段轮询</label>
+                  <p className="text-xs text-gray-500">
+                    开启后仅在交易日 9:15–11:30 与 12:55–15:05 检查。关闭后将 7×24 小时轮询。
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setTradingHoursOnly(!tradingHoursOnly)}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${tradingHoursOnly ? 'bg-blue-600' : 'bg-gray-600'}`}
+                >
+                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${tradingHoursOnly ? 'translate-x-6' : 'translate-x-1'}`} />
                 </button>
              </div>
           </div>
