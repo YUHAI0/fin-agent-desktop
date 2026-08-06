@@ -696,9 +696,9 @@ const ChatView: React.FC = () => {
             <Settings size={18} />
           </button>
           <button
-            onClick={() => window.api.openExternal('https://fin-agent.chat')}
+            onClick={() => navigate('/about')}
             className="text-xs text-gray-500 hover:text-blue-400 transition-colors cursor-pointer"
-            title="访问官网"
+            title="关于 / 支持"
           >v{version}</button>
         </div>
       </div>

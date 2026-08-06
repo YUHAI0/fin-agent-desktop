@@ -501,6 +501,13 @@ const ConfigView: React.FC = () => {
           >
             {loading ? '保存中...' : '保存配置'}
           </button>
+          <button
+            type="button"
+            onClick={() => navigate('/about')}
+            className="w-full mt-3 px-4 py-2 text-sm text-gray-400 border border-gray-700 rounded-lg hover:bg-gray-800 transition-colors"
+          >
+            关于 / 支持本项目
+          </button>
         </form>
       </div>
     </div>
