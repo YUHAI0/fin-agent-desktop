@@ -108,6 +108,24 @@ def init_agent():
         sys.stderr.flush()
         agent = None
 
+def build_session_agent(session_id):
+    """为一次请求构建独立的 FinAgent 实例，并注入该会话的历史。
+
+    FinAgent.__init__ 只构造 LLM 客户端并读取一次用户画像，开销可忽略，
+    因此每请求新建实例即可让多个标签真正并行生成。
+    """
+    Config.load()
+    agent_instance = FinAgent()
+    try:
+        body = session_store.get_session(session_id)
+    except KeyError:
+        # 请求的 session_id 尚无正文：空历史起步，写回时由 save_llm_history/_touch 建索引
+        body = {"llm_history": []}
+    history = body.get("llm_history") or []
+    if history:
+        agent_instance.history = history
+    return agent_instance
+
 class ApiError(Exception):
     """handler 抛出此异常以返回非 200 响应。"""
     def __init__(self, status, message):
@@ -439,12 +457,17 @@ class RequestHandler(BaseHTTPRequestHandler):
             data = json.loads(post_data.decode('utf-8'))
             user_input = data.get('message')
             debug_print(f"User input: {user_input}")
-            
-            if not agent:
-                 debug_print("Agent not initialized, trying to init...")
-                 init_agent()
-            
-            if not agent:
+
+            session_id = data.get('session_id')
+            if session_id:
+                active_agent = build_session_agent(session_id)
+            else:
+                if not agent:
+                    debug_print("Agent not initialized, trying to init...")
+                    init_agent()
+                active_agent = agent
+
+            if not active_agent:
                  debug_print("Agent init failed, returning 500")
                  self.send_response(500)
                  self.end_headers()
@@ -463,7 +486,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 # Use stream_chat generator which yields structured events
                 # debug_print("Starting event loop in api.py", file=sys.stderr)
                 event_count = 0
-                for event in agent.stream_chat(user_input):
+                for event in active_agent.stream_chat(user_input):
                     event_count += 1
                     payload = json.dumps(event)
                     # debug_print(f"Event #{event_count}: {event.get('type', 'unknown')} - {str(event)[:100]}", file=sys.stderr)
@@ -485,6 +508,13 @@ class RequestHandler(BaseHTTPRequestHandler):
                 except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
                     # 客户端断开连接（用户主动停止），静默处理
                     pass
+
+                if session_id:
+                    try:
+                        session_store.save_llm_history(session_id, active_agent.history)
+                    except Exception as e:
+                        sys.stderr.write(f"[Session] Failed to save history: {e}\n")
+                        sys.stderr.flush()
                     
                 # debug_print("Sent [DONE] signal", file=sys.stderr)
                     
