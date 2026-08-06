@@ -8,6 +8,8 @@ import { useChat, ChatBlock, Message } from '../contexts/ChatContext'
 import { KlinePanel } from './KlinePanel'
 import { BacktestEquityPanel } from './BacktestEquityPanel'
 import { ReminderTasksModal } from './ReminderTasksModal'
+import SessionTabs from './SessionTabs'
+import HistoryDrawer from './HistoryDrawer'
 import { parseToolResultToKline } from '../utils/parseToolOhlc'
 import { parseRunBacktestEquity } from '../utils/parseToolBacktest'
 import { getQuickReplyOptions, stripFinAgentChoicesForDisplay } from '../utils/extractReplyQuickOptions'
@@ -147,8 +149,9 @@ const markdownComponents = {
 
 const ChatView: React.FC = () => {
   const navigate = useNavigate()
-  const { messages, setMessages } = useChat() // 使用 Context 中的消息历史
+  const { messages, setMessages, activeSessionId } = useChat() // 使用 Context 中的消息历史
   const [input, setInput] = useState('')
+  const [drawerOpen, setDrawerOpen] = useState(false)
   const [isTyping, setIsTyping] = useState(false)
   const [isResponding, setIsResponding] = useState(false) // 跟踪AI是否正在响应
   const [version, setVersion] = useState('...')
@@ -591,7 +594,7 @@ const ChatView: React.FC = () => {
       return
     }
 
-    window.api.submitInput(trimmed)
+    window.api.submitInput(trimmed, activeSessionId ?? undefined)
     setInput('')
     setIsResponding(true)
     setTimeout(() => {
@@ -632,7 +635,7 @@ const ChatView: React.FC = () => {
 
 
   return (
-    <div className="flex flex-col h-screen bg-gray-900 text-white drag-region">
+    <div className="relative flex flex-col h-screen bg-gray-900 text-white drag-region">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800 bg-gray-900/50 backdrop-blur no-drag">
         <div className="font-semibold text-lg">Fin-Agent</div>
@@ -661,6 +664,8 @@ const ChatView: React.FC = () => {
       </div>
 
       <ReminderTasksModal open={reminderModalOpen} onClose={() => setReminderModalOpen(false)} />
+
+      <SessionTabs onOpenDrawer={() => setDrawerOpen(true)} />
 
       {/* Messages */}
       <div 
@@ -786,6 +791,8 @@ const ChatView: React.FC = () => {
           </button>
         </form>
       </div>
+
+      <HistoryDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
     </div>
   )
 }
