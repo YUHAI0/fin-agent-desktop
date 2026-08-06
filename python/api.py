@@ -65,6 +65,7 @@ try:
     from fin_agent.config import Config
     from fin_agent.scheduler import TaskScheduler
     from fin_agent import session_store
+    from fin_agent.portfolio import PortfolioManager
 except ImportError as e:
     print(f"Error importing fin_agent: {e}", file=sys.stderr)
     sys.exit(1)
@@ -373,6 +374,94 @@ def handle_session_save_ui(req):
         raise ApiError(400, "missing id")
     session_store.save_ui_messages(session_id, req.body.get("ui_messages") or [])
     return {"success": True}
+
+
+def _portfolio_result(message):
+    """PortfolioManager 用字符串前缀表达错误，这里转成结构化响应。"""
+    if isinstance(message, str) and message.startswith("Error:"):
+        raise ApiError(400, message[len("Error:"):].strip())
+    return {"success": True, "message": message}
+
+
+@route("GET", "/portfolio/list")
+def handle_portfolio_list(req):
+    return PortfolioManager().list_portfolios()
+
+
+@route("GET", "/portfolio/detail")
+def handle_portfolio_detail(req):
+    try:
+        return PortfolioManager().get_portfolio_status(req.query.get("id") or None)
+    except ValueError as e:
+        raise ApiError(404, str(e))
+
+
+@route("POST", "/portfolio/create")
+def handle_portfolio_create(req):
+    result = PortfolioManager().create_portfolio(req.body.get("name"))
+    if isinstance(result, str) and result.startswith("Error:"):
+        raise ApiError(400, result[len("Error:"):].strip())
+    return {"success": True, "id": result}
+
+
+@route("POST", "/portfolio/rename")
+def handle_portfolio_rename(req):
+    try:
+        return _portfolio_result(
+            PortfolioManager().rename_portfolio(req.body.get("id"), req.body.get("name"))
+        )
+    except ValueError as e:
+        raise ApiError(404, str(e))
+
+
+@route("POST", "/portfolio/delete")
+def handle_portfolio_delete(req):
+    try:
+        return _portfolio_result(PortfolioManager().delete_portfolio(req.body.get("id")))
+    except ValueError as e:
+        raise ApiError(404, str(e))
+
+
+@route("POST", "/portfolio/position/add")
+def handle_position_add(req):
+    body = req.body
+    try:
+        return _portfolio_result(PortfolioManager().create_position(
+            body.get("ts_code"),
+            int(body.get("amount", 0)),
+            float(body.get("cost", 0)),
+            body.get("bought_at", ""),
+            body.get("note", ""),
+            portfolio=body.get("id") or None,
+        ))
+    except ValueError as e:
+        raise ApiError(400, str(e))
+
+
+@route("POST", "/portfolio/position/update")
+def handle_position_update(req):
+    body = req.body
+    try:
+        return _portfolio_result(PortfolioManager().update_position(
+            body.get("ts_code"),
+            int(body.get("amount", 0)),
+            float(body.get("cost", 0)),
+            body.get("bought_at", ""),
+            body.get("note", ""),
+            portfolio=body.get("id") or None,
+        ))
+    except ValueError as e:
+        raise ApiError(400, str(e))
+
+
+@route("POST", "/portfolio/position/delete")
+def handle_position_delete(req):
+    try:
+        return _portfolio_result(
+            PortfolioManager().delete_position(req.body.get("ts_code"), portfolio=req.body.get("id") or None)
+        )
+    except ValueError as e:
+        raise ApiError(404, str(e))
 
 
 class RequestHandler(BaseHTTPRequestHandler):
