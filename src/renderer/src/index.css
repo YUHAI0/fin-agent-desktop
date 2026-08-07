@@ -119,3 +119,27 @@ body {
 .animate-scale-in {
   animation: scale-in 0.2s ease-out;
 }
+
+.fa-stream-caret {
+  display: inline-block;
+  width: 0.55ch;
+  margin-left: 1px;
+  border-radius: 1px;
+  background: var(--fa-accent);
+  color: transparent;
+  animation: fa-caret-blink 1s steps(1, end) infinite;
+  vertical-align: text-bottom;
+  height: 1.1em;
+}
+
+@keyframes fa-caret-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fa-stream-caret {
+    animation: none;
+    opacity: 0;
+  }
+}
