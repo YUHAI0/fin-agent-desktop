@@ -13,6 +13,11 @@ import HistoryDrawer from './HistoryDrawer'
 import { parseToolResultToKline } from '../utils/parseToolOhlc'
 import { parseRunBacktestEquity } from '../utils/parseToolBacktest'
 import { getQuickReplyOptions, stripFinAgentChoicesForDisplay } from '../utils/extractReplyQuickOptions'
+import {
+  prefersReducedMotion,
+  StreamRevealController,
+  type RevealKind
+} from '../utils/streamReveal'
 
 // ToolExecutionBlock type helper
 type ToolExecutionBlock = Extract<ChatBlock, { type: 'tool_execution' }>
@@ -162,6 +167,93 @@ const ChatView: React.FC = () => {
   const inputRef = useRef<HTMLInputElement>(null)
   const activeSessionIdRef = useRef(activeSessionId)
   activeSessionIdRef.current = activeSessionId
+  const revealRef = useRef<StreamRevealController | null>(null)
+  const [revealingKeys, setRevealingKeys] = useState<Set<string>>(() => new Set())
+
+  const applyToSession = (
+    sessionId: string | undefined,
+    updater: (prev: Message[]) => Message[]
+  ) => {
+    if (sessionId) {
+      updateSessionMessages(sessionId, updater)
+    } else if (activeSessionIdRef.current) {
+      updateSessionMessages(activeSessionIdRef.current, updater)
+    } else {
+      setMessages(updater)
+    }
+  }
+  const applyToSessionRef = useRef(applyToSession)
+  applyToSessionRef.current = applyToSession
+
+  const appendRevealed = (sessionKey: string, kind: RevealKind, chunk: string) => {
+    const sessionId = sessionKey === '__default__' ? undefined : sessionKey
+    applyToSessionRef.current(sessionId, (prev) => {
+      const newMessages = [...prev]
+      if (!newMessages.length || newMessages[newMessages.length - 1].role !== 'assistant') {
+        newMessages.push({ role: 'assistant', content: '', logs: '', blocks: [] })
+      }
+
+      const ai = newMessages.length - 1
+      const src = newMessages[ai]
+      newMessages[ai] = {
+        ...src,
+        blocks: (src.blocks || []).map((block) => ({ ...block }))
+      }
+      const assistantMsg = newMessages[ai]
+      if (!assistantMsg.blocks) assistantMsg.blocks = []
+
+      const last = assistantMsg.blocks[assistantMsg.blocks.length - 1]
+      if (kind === 'text') {
+        assistantMsg.content = (assistantMsg.content || '') + chunk
+        if (last?.type === 'text') {
+          assistantMsg.blocks[assistantMsg.blocks.length - 1] = {
+            ...last,
+            content: last.content + chunk
+          }
+        } else {
+          assistantMsg.blocks.push({ type: 'text', content: chunk })
+        }
+      } else if (last?.type === 'thinking') {
+        assistantMsg.blocks[assistantMsg.blocks.length - 1] = {
+          ...last,
+          content: last.content + chunk
+        }
+      } else {
+        assistantMsg.blocks.push({ type: 'thinking', content: chunk })
+      }
+
+      return newMessages
+    })
+  }
+  const appendRevealedRef = useRef(appendRevealed)
+  appendRevealedRef.current = appendRevealed
+
+  useEffect(() => {
+    const ctrl = new StreamRevealController({
+      onReveal: (sessionKey, kind, chunk) => {
+        appendRevealedRef.current(sessionKey, kind, chunk)
+        if (!prefersReducedMotion()) {
+          setRevealingKeys((prev) => {
+            const next = new Set(prev)
+            next.add(sessionKey)
+            return next
+          })
+        }
+      },
+      onSettled: (sessionKey) => {
+        setRevealingKeys((prev) => {
+          const next = new Set(prev)
+          next.delete(sessionKey)
+          return next
+        })
+      }
+    })
+    revealRef.current = ctrl
+    return () => {
+      ctrl.disposeAll()
+      revealRef.current = null
+    }
+  }, [])
 
   const respondingKey = (sessionId?: string | null) => sessionId || activeSessionIdRef.current || '__default__'
   const isResponding = respondingSessions.has(respondingKey(activeSessionId))
@@ -217,15 +309,10 @@ const ChatView: React.FC = () => {
   }, [])
 
   useEffect(() => {
-    const applyToSession = (sessionId: string | undefined, updater: (prev: Message[]) => Message[]) => {
-      if (sessionId) {
-        updateSessionMessages(sessionId, updater)
-      } else if (activeSessionIdRef.current) {
-        updateSessionMessages(activeSessionIdRef.current, updater)
-      } else {
-        setMessages(updater)
-      }
-    }
+    const applyToSession = (
+      sessionId: string | undefined,
+      updater: (prev: Message[]) => Message[]
+    ) => applyToSessionRef.current(sessionId, updater)
 
     const isActiveSession = (sessionId?: string) =>
       !sessionId || sessionId === activeSessionIdRef.current
@@ -276,6 +363,23 @@ const ChatView: React.FC = () => {
 
         if (data.type === 'error' || data.type === 'finish') {
           markResponding(eventSessionId, false)
+          const key = eventSessionId || activeSessionIdRef.current || '__default__'
+          revealRef.current?.markEnded(key)
+        }
+
+        if (data.type === 'content' || data.type === 'thinking') {
+          applyToSession(eventSessionId, (prev) => {
+            const last = prev[prev.length - 1]
+            if (last?.role === 'assistant') return prev
+            return [...prev, { role: 'assistant', content: '', logs: '', blocks: [] }]
+          })
+          const key = eventSessionId || activeSessionIdRef.current || '__default__'
+          revealRef.current?.enqueue(
+            key,
+            data.type === 'content' ? 'text' : 'thinking',
+            data.content || ''
+          )
+          return
         }
 
         const patchFromStream = (prev: Message[]) => {
@@ -298,15 +402,6 @@ const ChatView: React.FC = () => {
             const assistantMsg = newMessages[ai]
             if (!assistantMsg.blocks) assistantMsg.blocks = []
             
-            // Helper to get or create last block of specific type
-            const getLastBlock = (type: ChatBlock['type']) => {
-                const lastBlock = assistantMsg.blocks[assistantMsg.blocks.length - 1]
-                if (lastBlock && lastBlock.type === type) {
-                    return lastBlock
-                }
-                return null
-            }
-            
             // Helper specifically for tool execution
             const getLastToolExecution = () => {
                 const lastBlock = assistantMsg.blocks[assistantMsg.blocks.length - 1]
@@ -316,36 +411,19 @@ const ChatView: React.FC = () => {
                 return null
             }
 
-            if (data.type === 'content') {
-                assistantMsg.content += data.content
-                const lastBlock = getLastBlock('text')
-                if (lastBlock && lastBlock.type === 'text') {
-                    lastBlock.content += data.content
-                } else {
-                    assistantMsg.blocks.push({ type: 'text', content: data.content })
-                }
-            } else if (data.type === 'answer') {
+            if (data.type === 'answer') {
                 // Some providers only return a final answer event.
-                if (!assistantMsg.content || assistantMsg.content.trim() === '') {
-                    assistantMsg.content = data.content || ''
-                    // Also add to blocks if empty
-                    if (assistantMsg.blocks.length === 0) {
-                         assistantMsg.blocks.push({ type: 'text', content: data.content || '' })
-                    } else {
-                        // Check if we should append to last text block
-                        const lastBlock = getLastBlock('text')
-                        if (lastBlock && lastBlock.type === 'text') lastBlock.content += (data.content || '')
-                        else assistantMsg.blocks.push({ type: 'text', content: data.content || '' })
-                    }
+                const key = eventSessionId || activeSessionIdRef.current || '__default__'
+                const ctrl = revealRef.current
+                const hasText =
+                    Boolean(assistantMsg.content?.trim()) ||
+                    assistantMsg.blocks.some(
+                        (block) => block.type === 'text' && Boolean(block.content)
+                    )
+                if (!hasText && !ctrl?.isRevealing(key) && data.content) {
+                    ctrl?.enqueue(key, 'text', data.content)
                 }
-            } else if (data.type === 'thinking') {
-                // We keep thinking separate, usually at start or interleaved
-                const lastBlock = getLastBlock('thinking')
-                if (lastBlock && lastBlock.type === 'thinking') {
-                    lastBlock.content += data.content
-                } else {
-                    assistantMsg.blocks.push({ type: 'thinking', content: data.content })
-                }
+                ctrl?.markEnded(key)
             } else if (data.type === 'log') {
                 assistantMsg.logs = (assistantMsg.logs || '') + `[Log] ${data.content}\n`
             } else if (data.type === 'tool_call') {
@@ -650,8 +728,11 @@ const ChatView: React.FC = () => {
 
     if (isResponding) {
       console.log('[ChatView] Stopping generation...')
+      const key = activeSessionId || '__default__'
+      revealRef.current?.flush(key)
       window.api.stopGeneration(activeSessionId ?? undefined)
       markResponding(activeSessionId ?? undefined, false)
+      setIsTyping(false)
       return
     }
 
@@ -749,15 +830,28 @@ const ChatView: React.FC = () => {
                     }
                     if (block.type === 'text') {
                       const md = stripFinAgentChoicesForDisplay(block.content)
+                      const lastTextBlockIndex =
+                        msg.blocks?.reduce(
+                          (lastIndex, candidate, candidateIndex) =>
+                            candidate.type === 'text' ? candidateIndex : lastIndex,
+                          -1
+                        ) ?? -1
+                      const showCaret =
+                        idx === messages.length - 1 &&
+                        bIdx === lastTextBlockIndex &&
+                        revealingKeys.has(activeSessionId || '__default__')
                       return (
-                        <div key={bIdx} className="prose prose-invert prose-sm max-w-none">
-                          <ReactMarkdown 
-                            remarkPlugins={[remarkGfm]}
-                            components={markdownComponents}
-                          >
-                            {md}
-                          </ReactMarkdown>
-                        </div>
+                        <React.Fragment key={bIdx}>
+                          <div className="prose prose-invert prose-sm max-w-none">
+                            <ReactMarkdown
+                              remarkPlugins={[remarkGfm]}
+                              components={markdownComponents}
+                            >
+                              {md}
+                            </ReactMarkdown>
+                          </div>
+                          {showCaret && <span className="fa-stream-caret" aria-hidden />}
+                        </React.Fragment>
                       )
                     }
                     return null
