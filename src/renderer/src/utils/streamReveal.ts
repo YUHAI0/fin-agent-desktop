@@ -61,6 +61,7 @@ export class StreamRevealController {
     }
     const s = this.ensure(sessionKey)
     s.settled = false
+    s.ended = false
     const last = s.queue[s.queue.length - 1]
     if (last && last.kind === kind) {
       last.text += text
