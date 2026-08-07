@@ -155,6 +155,7 @@ const markdownComponents = {
 const ChatView: React.FC = () => {
   const navigate = useNavigate()
   const { messages, setMessages, updateSessionMessages, activeSessionId } = useChat() // 使用 Context 中的消息历史
+  const { openTabs } = useChat()
   const [input, setInput] = useState('')
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [isTyping, setIsTyping] = useState(false)
@@ -168,6 +169,7 @@ const ChatView: React.FC = () => {
   const activeSessionIdRef = useRef(activeSessionId)
   activeSessionIdRef.current = activeSessionId
   const revealRef = useRef<StreamRevealController | null>(null)
+  const previousOpenTabIdsRef = useRef<Set<string>>(new Set())
   const [revealingKeys, setRevealingKeys] = useState<Set<string>>(() => new Set())
 
   const applyToSession = (
@@ -254,6 +256,21 @@ const ChatView: React.FC = () => {
       revealRef.current = null
     }
   }, [])
+  useEffect(() => {
+    const currentOpenTabIds = new Set(openTabs.map((tab) => tab.id))
+    const closedTabIds = [...previousOpenTabIdsRef.current].filter(
+      (id) => !currentOpenTabIds.has(id)
+    )
+    closedTabIds.forEach((id) => revealRef.current?.dispose(id))
+    if (closedTabIds.length > 0) {
+      setRevealingKeys((prev) => {
+        const next = new Set(prev)
+        closedTabIds.forEach((id) => next.delete(id))
+        return next
+      })
+    }
+    previousOpenTabIdsRef.current = currentOpenTabIds
+  }, [openTabs])
 
   const respondingKey = (sessionId?: string | null) => sessionId || activeSessionIdRef.current || '__default__'
   const isResponding = respondingSessions.has(respondingKey(activeSessionId))
@@ -420,6 +437,7 @@ const ChatView: React.FC = () => {
                     assistantMsg.blocks.some(
                         (block) => block.type === 'text' && Boolean(block.content)
                     )
+                // Providers may send both content chunks and a final answer; an active reveal already owns that text.
                 if (!hasText && !ctrl?.isRevealing(key) && data.content) {
                     ctrl?.enqueue(key, 'text', data.content)
                 }

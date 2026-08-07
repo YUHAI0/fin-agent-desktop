@@ -147,10 +147,12 @@ export class StreamRevealController {
       const msPerChar = 1000 / CHARS_PER_SECOND
       let budget = Math.floor(st.carryMs / msPerChar)
       if (budget <= 0) {
-        if (st.queue.length > 0 || !st.ended) {
+        if (st.queue.length > 0) {
           st.rafId = requestAnimationFrame(tick)
-        } else {
+        } else if (st.ended) {
           this.settle(sessionKey)
+        } else {
+          this.cancelRaf(st)
         }
         return
       }
@@ -167,10 +169,12 @@ export class StreamRevealController {
         this.handlers.onReveal(sessionKey, head.kind, taken)
       }
 
-      if (st.queue.length > 0 || !st.ended) {
+      if (st.queue.length > 0) {
         st.rafId = requestAnimationFrame(tick)
-      } else {
+      } else if (st.ended) {
         this.settle(sessionKey)
+      } else {
+        this.cancelRaf(st)
       }
     }
     s.rafId = requestAnimationFrame(tick)
