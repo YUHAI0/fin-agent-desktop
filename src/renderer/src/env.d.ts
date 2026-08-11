@@ -17,6 +17,7 @@ interface ConfigData {
     data_source?: 'akshare' | 'tushare'
     alert_poll_interval_minutes?: number
     alert_trading_hours_only?: boolean
+    news_poll_interval_minutes?: 5 | 10 | 15 | 30
 }
 
 interface SessionMeta {
@@ -75,6 +76,108 @@ interface PositionPayload {
   note?: string
 }
 
+type NewsSubscriptionType = 'sector' | 'topic' | 'portfolio'
+type NewsSource = 'stock_news_em' | 'stock_info_global_cls' | 'stock_info_global_em'
+
+interface NewsSubscription {
+  id: string
+  type: NewsSubscriptionType
+  name: string
+  enabled: boolean
+  keywords: string[]
+  exclude_keywords: string[]
+  sources: NewsSource[]
+  symbols?: string[]
+  created_at: string
+  updated_at: string
+}
+
+interface NewsSubscriptionInput {
+  type: NewsSubscriptionType
+  name?: string
+  enabled?: boolean
+  keywords?: string[]
+  exclude_keywords?: string[]
+  sources?: NewsSource[]
+  symbols?: string[]
+}
+
+type NewsSubscriptionUpdate = Partial<Omit<NewsSubscriptionInput, 'type'>>
+
+interface NotifiedNewsItem {
+  id: string
+  source: NewsSource
+  source_id: string
+  title: string
+  summary: string
+  url: string
+  published_at: string
+  symbols: string[]
+  fingerprint: string
+  title_day_fingerprint: string
+  fingerprint_version: number
+  read: boolean
+  notification_pending: boolean
+  pending_subscription_ids: string[]
+  notified_at: string | null
+  matched_subscription_ids: string[]
+  matched_symbols: string[]
+  related_sources: NewsSource[]
+  source_alias_ids: string[]
+  updated_at: string
+}
+
+interface NewsListFilters {
+  page?: number
+  pageSize?: number
+  unread?: boolean
+  type?: NewsSubscriptionType
+  source?: NewsSource
+  symbol?: string
+  query?: string
+  subscriptionId?: string
+  newsId?: string
+}
+
+interface NewsPage {
+  items: NotifiedNewsItem[]
+  total: number
+  page: number
+  page_size: number
+  has_more: boolean
+}
+
+interface NewsSourceHealthEntry {
+  failure_count: number
+  next_fetch_at: string | null
+  last_success: string | null
+  last_error: string | null
+}
+
+interface NewsSourceHealth {
+  sources: Record<string, NewsSourceHealthEntry>
+  symbol_sources: Record<string, Record<string, NewsSourceHealthEntry>>
+}
+
+interface NewsMonitorStatus {
+  running: boolean
+  cycle_running: boolean
+  closed: boolean
+  poll_interval_minutes: number
+  last_started_at: string | null
+  last_completed_at: string | null
+  last_error: string | null
+  source_health?: NewsSourceHealth
+}
+
+interface NewsNotificationOpenPayload {
+  newsId?: string
+  subscriptionId?: string
+  subscriptionIds: string[]
+  source?: NewsSource
+  url?: string
+}
+
 declare interface Window {
   api: {
     submitInput: (text: string, sessionId?: string) => void
@@ -92,11 +195,11 @@ declare interface Window {
     saveConfig: (data: ConfigData) => Promise<{ success: boolean; error?: string; path?: string }>
     openSettings: () => void
     resetConversationContext: () => void
-    openExternal: (url: string) => Promise<void>
+    openExternal: (url: string) => Promise<{ success: boolean; error?: string }>
     onFocusInput: (callback: () => void) => () => void
     onQuitConfirm: (callback: () => void) => () => void
     quitConfirmed: (confirmed: boolean) => void
-    onNavigate: (callback: (route: string) => void) => void
+    onNavigate: (callback: (route: string) => void) => () => void
     suspendShortcut: () => Promise<void>
     resumeShortcut: () => Promise<void>
     checkShortcut: (shortcut: string) => Promise<boolean>
@@ -106,6 +209,45 @@ declare interface Window {
     removeSchedulerTask: (
       taskId: string
     ) => Promise<{ success?: boolean; removed?: boolean; error?: string }>
+    listNewsSubscriptions: (
+      filters?: { enabled?: boolean; type?: NewsSubscriptionType }
+    ) => Promise<{ subscriptions: NewsSubscription[]; error?: string }>
+    createNewsSubscription: (
+      payload: NewsSubscriptionInput
+    ) => Promise<{ success: boolean; subscription?: NewsSubscription; error?: string }>
+    updateNewsSubscription: (
+      id: string,
+      payload: NewsSubscriptionUpdate
+    ) => Promise<{ success: boolean; subscription?: NewsSubscription; error?: string }>
+    deleteNewsSubscription: (
+      id: string
+    ) => Promise<{ success: boolean; deleted?: boolean; error?: string }>
+    toggleNewsSubscription: (
+      id: string,
+      enabled: boolean
+    ) => Promise<{ success: boolean; subscription?: NewsSubscription; error?: string }>
+    listNews: (filters?: NewsListFilters) => Promise<NewsPage>
+    getNewsUnreadCount: () => Promise<{ count: number; error?: string }>
+    markNewsRead: (
+      id: string,
+      read?: boolean
+    ) => Promise<{ success: boolean; error?: string }>
+    markNewsReadBatch: (
+      ids: string[],
+      read?: boolean
+    ) => Promise<{ success: boolean; changed?: number; error?: string }>
+    markAllNewsRead: () => Promise<{ success: boolean; changed?: number; error?: string }>
+    clearNews: () => Promise<{ success: boolean; cleared?: number; error?: string }>
+    getNewsMonitorStatus: () => Promise<NewsMonitorStatus>
+    refreshNews: () => Promise<{
+      success: boolean
+      accepted?: boolean
+      status?: NewsMonitorStatus
+      error?: string
+    }>
+    onNewsNotificationOpen: (
+      callback: (payload: NewsNotificationOpenPayload) => void
+    ) => () => void
     listSessions: (offset: number, limit: number) => Promise<{ sessions: SessionMeta[]; total: number }>
     getSession: (id: string) => Promise<SessionBody>
     createSession: (title?: string) => Promise<SessionMeta>
@@ -122,5 +264,7 @@ declare interface Window {
     addPosition: (payload: PositionPayload) => Promise<{ success: boolean; error?: string }>
     updatePosition: (payload: PositionPayload) => Promise<{ success: boolean; error?: string }>
     deletePosition: (id: string | undefined, tsCode: string) => Promise<{ success: boolean; error?: string }>
+    setTitleBarTheme: (theme: 'dark' | 'light') => Promise<void>
+    platform: string
   }
 }

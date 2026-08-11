@@ -1,19 +1,104 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* Codex 色板 — 深灰层级，非纯黑 */
+:root,
+[data-theme='dark'] {
+  --fa-bg: #0d0d0d;
+  --fa-sidebar: #0d0d0d;
+  --fa-main: #161616;
+  --fa-surface: #252525;
+  --fa-surface-hover: #2a2a2a;
+  --fa-composer-bg: #2a2a2a;
+  --fa-border: rgba(255, 255, 255, 0.06);
+  --fa-border-subtle: rgba(255, 255, 255, 0.04);
+  --fa-text: #e0e0e0;
+  --fa-muted: #8e8e8e;
+  --fa-faint: #6b6b6b;
+  --fa-accent: #f59e0b;
+  --fa-accent-soft: rgba(245, 158, 11, 0.12);
+  --fa-user-bubble: #252525;
+  --fa-danger: #ef4444;
+  /* 深色主题下 --fa-danger 用作白字底色时对比度不足 4.5:1，未读徽标等小字场景改用更深的红色 */
+  --fa-danger-strong: #b91c1c;
+  --fa-chart-bg: #161616;
+  --fa-chart-text: #8e8e8e;
+  --fa-chart-grid: rgba(255, 255, 255, 0.05);
+  --fa-chart-border: rgba(255, 255, 255, 0.06);
+  --fa-chart-area-top: rgba(245, 158, 11, 0.18);
+  --fa-chart-area-bottom: rgba(245, 158, 11, 0);
+  --fa-candle-up: #ef4444;
+  --fa-candle-down: #22c55e;
+  --fa-scrollbar: rgb(70 70 70 / 0.5);
+  --fa-scrollbar-hover: rgb(100 100 100 / 0.75);
+  --fa-stripe: rgba(255, 255, 255, 0.02);
+  --fa-code-bg: rgba(255, 255, 255, 0.04);
+  --fa-overlay: rgba(0, 0, 0, 0.55);
+  --fa-composer-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04);
+  --fa-titlebar-height: 40px;
+  /* Windows 11 窗口控制按钮宽度：3 × 46px */
+  --fa-window-controls-width: 138px;
+  --fa-radius: 12px;
+  --fa-radius-xl: 20px;
+  --fa-radius-2xl: 24px;
+  --fa-font: 'Inter', 'Segoe UI Variable Text', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei UI', sans-serif;
+  --fa-mono: 'Cascadia Code', 'Sarasa Mono SC', 'Consolas', ui-monospace, monospace;
+}
+
+/* light — 纸面浅色，悬浮输入岛保留层次 */
+[data-theme='light'] {
+  --fa-bg: #f4f4f5;
+  --fa-main: #fafafa;
+  --fa-sidebar: #ffffff;
+  --fa-surface: #ffffff;
+  --fa-surface-hover: #f4f4f5;
+  --fa-border: #e4e4e7;
+  --fa-border-subtle: #f0f0f2;
+  --fa-text: #09090b;
+  --fa-muted: #52525b;
+  --fa-faint: #71717a;
+  --fa-accent: #2563eb;
+  --fa-accent-soft: rgba(37, 99, 235, 0.08);
+  --fa-user-bubble: #f4f4f5;
+  --fa-danger: #dc2626;
+  /* 浅色主题下 --fa-danger 已满足白字 4.5:1 对比度，沿用同色即可 */
+  --fa-danger-strong: #dc2626;
+  --fa-chart-bg: #ffffff;
+  --fa-chart-text: #52525b;
+  --fa-chart-grid: #f0f0f2;
+  --fa-chart-border: #e4e4e7;
+  --fa-chart-area-top: rgba(37, 99, 235, 0.14);
+  --fa-chart-area-bottom: rgba(37, 99, 235, 0);
+  --fa-candle-up: #e11d48;
+  --fa-candle-down: #059669;
+  --fa-scrollbar: rgb(161 161 170 / 0.45);
+  --fa-scrollbar-hover: rgb(113 113 122 / 0.65);
+  --fa-stripe: rgba(9, 9, 11, 0.025);
+  --fa-code-bg: #f4f4f5;
+  --fa-overlay: rgba(9, 9, 11, 0.35);
+  --fa-composer-bg: #ffffff;
+  --fa-composer-shadow: 0 0 0 1px rgba(9, 9, 11, 0.06), 0 8px 32px rgba(9, 9, 11, 0.06);
+}
+
 body {
   margin: 0;
   padding: 0;
-  background-color: transparent;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  background-color: var(--fa-sidebar);
+  color: var(--fa-text);
+  font-family: var(--fa-font);
+  font-size: 15px;
+  line-height: 1.55;
   overflow: hidden;
+  -webkit-font-smoothing: antialiased;
 }
 
-/* 全局细滚动条（Electron/Chromium + Firefox） */
+/* 全局细滚动条 */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgb(71 85 105 / 0.75) rgb(15 23 42 / 0.35);
+  scrollbar-color: var(--fa-scrollbar) transparent;
 }
 
 *::-webkit-scrollbar {
@@ -22,20 +107,16 @@ body {
 }
 
 *::-webkit-scrollbar-track {
-  background: rgb(15 23 42 / 0.25);
-  border-radius: 9999px;
+  background: transparent;
 }
 
 *::-webkit-scrollbar-thumb {
-  background: rgb(71 85 105 / 0.65);
+  background: var(--fa-scrollbar);
   border-radius: 9999px;
-  border: 1px solid transparent;
-  background-clip: padding-box;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: rgb(100 116 139 / 0.85);
-  background-clip: padding-box;
+  background: var(--fa-scrollbar-hover);
 }
 
 *::-webkit-scrollbar-corner {
@@ -50,16 +131,16 @@ body {
   -webkit-app-region: no-drag;
 }
 
-/* 表格样式优化 - 确保表格正确显示 */
+/* 表格样式 — 跟随主题，避免白天模式灰底浅字 */
 .prose table {
-  @apply w-full border-collapse my-4;
+  @apply my-4 w-full border-collapse;
   display: table !important;
   table-layout: auto;
   width: 100%;
 }
 
 .prose thead {
-  @apply bg-gray-800/50;
+  background: var(--fa-surface-hover);
   display: table-header-group !important;
 }
 
@@ -68,14 +149,16 @@ body {
 }
 
 .prose th {
-  @apply border border-gray-700 px-4 py-2 text-left font-semibold text-gray-200;
-  white-space: nowrap;
+  @apply whitespace-nowrap border px-4 py-2.5 text-left text-sm font-semibold;
+  border-color: var(--fa-border);
+  color: var(--fa-text);
   display: table-cell !important;
 }
 
 .prose td {
-  @apply border border-gray-700 px-4 py-2 text-gray-300;
-  white-space: nowrap;
+  @apply whitespace-nowrap border px-4 py-2.5 text-sm;
+  border-color: var(--fa-border);
+  color: var(--fa-muted);
   display: table-cell !important;
 }
 
@@ -83,33 +166,74 @@ body {
   display: table-row !important;
 }
 
-.prose tbody tr {
-  @apply hover:bg-gray-800/30 transition-colors;
+.prose tbody tr:hover {
+  background: var(--fa-surface-hover);
 }
 
 .prose tbody tr:nth-child(even) {
-  @apply bg-gray-900/30;
+  background: var(--fa-stripe);
 }
 
-/* Modal animations */
+.prose-fa {
+  --tw-prose-body: var(--fa-text);
+  --tw-prose-headings: var(--fa-text);
+  --tw-prose-lead: var(--fa-muted);
+  --tw-prose-links: var(--fa-accent);
+  --tw-prose-bold: var(--fa-text);
+  --tw-prose-counters: var(--fa-faint);
+  --tw-prose-bullets: var(--fa-faint);
+  --tw-prose-hr: var(--fa-border);
+  --tw-prose-quotes: var(--fa-muted);
+  --tw-prose-quote-borders: var(--fa-accent);
+  --tw-prose-captions: var(--fa-faint);
+  --tw-prose-kbd: var(--fa-text);
+  --tw-prose-kbd-shadows: var(--fa-border);
+  --tw-prose-code: var(--fa-text);
+  --tw-prose-pre-code: var(--fa-text);
+  --tw-prose-pre-bg: var(--fa-code-bg);
+  --tw-prose-th-borders: var(--fa-border);
+  --tw-prose-td-borders: var(--fa-border-subtle);
+}
+
+.prose-fa blockquote {
+  font-style: normal;
+  color: var(--fa-muted);
+  border-inline-start-color: color-mix(in srgb, var(--fa-accent) 55%, var(--fa-border));
+  background: var(--fa-surface);
+  border-radius: 0 10px 10px 0;
+  padding: 0.65rem 1rem;
+}
+
+.prose-fa pre {
+  color: var(--fa-text);
+  background: var(--fa-code-bg);
+  border: 1px solid var(--fa-border);
+  border-radius: 10px;
+  font-family: var(--fa-mono);
+}
+
+.prose-fa pre code {
+  color: inherit;
+  font-weight: 400;
+}
+
+.prose-fa code:not(pre code) {
+  background: var(--fa-code-bg);
+  border-radius: 6px;
+  padding: 0.1em 0.4em;
+  font-size: 0.9em;
+  font-family: var(--fa-mono);
+  color: var(--fa-text);
+}
+
 @keyframes fade-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 @keyframes scale-in {
-  from {
-    opacity: 0;
-    transform: scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1); }
 }
 
 .animate-fade-in {
@@ -120,26 +244,413 @@ body {
   animation: scale-in 0.2s ease-out;
 }
 
-.fa-stream-caret {
-  display: inline-block;
-  width: 0.55ch;
-  margin-left: 1px;
-  border-radius: 1px;
-  background: var(--fa-accent);
-  color: transparent;
-  animation: fa-caret-blink 1s steps(1, end) infinite;
-  vertical-align: text-bottom;
-  height: 1.1em;
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in,
+  .animate-scale-in {
+    animation: none;
+  }
 }
 
-@keyframes fa-caret-blink {
-  0%, 49% { opacity: 1; }
-  50%, 100% { opacity: 0; }
+.fa-stream-live > :last-child {
+  width: fit-content;
+  max-width: 100%;
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    var(--fa-main) 0%,
+    var(--fa-main) calc(100% - 4.75em),
+    color-mix(in srgb, var(--fa-main) 45%, transparent) calc(100% - 1.6em),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    90deg,
+    var(--fa-main) 0%,
+    var(--fa-main) calc(100% - 4.75em),
+    color-mix(in srgb, var(--fa-main) 45%, transparent) calc(100% - 1.6em),
+    transparent 100%
+  );
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .fa-stream-caret {
-    animation: none;
-    opacity: 0;
+  .fa-stream-live > :last-child {
+    width: auto;
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+}
+
+@layer components {
+  /* 与系统标题栏等高、可拖拽移动窗口的一行；其中的交互控件自动排除拖拽 */
+  .fa-titlebar-row {
+    -webkit-app-region: drag;
+    min-height: var(--fa-titlebar-height);
+  }
+
+  .fa-titlebar-row button,
+  .fa-titlebar-row a,
+  .fa-titlebar-row input,
+  .fa-titlebar-row select,
+  .fa-titlebar-row [role='button'],
+  .fa-titlebar-row [role='group'] {
+    -webkit-app-region: no-drag;
+  }
+
+  /* Windows 的最小化/最大化/关闭在右上，macOS 的红绿灯在左上 */
+  [data-platform='win32'] .fa-titlebar-row--reserve-end {
+    padding-right: var(--fa-window-controls-width);
+  }
+
+  [data-platform='darwin'] .fa-titlebar-row--reserve-start {
+    padding-left: 76px;
+  }
+
+  .fa-shell-main {
+    @apply relative flex min-h-0 min-w-0 flex-1 flex-col;
+    background: var(--fa-sidebar);
+  }
+
+  .fa-main-panel {
+    @apply relative flex min-h-0 flex-1 flex-col overflow-hidden;
+    background: var(--fa-main);
+    border-radius: var(--fa-radius-2xl);
+    margin: 0 12px 12px 8px;
+  }
+
+  [data-theme='light'] .fa-main-panel {
+    border: 1px solid var(--fa-border-subtle);
+  }
+
+  .fa-shell-toolbar {
+    @apply flex shrink-0 items-center justify-end gap-0.5 pl-2 pr-3;
+  }
+
+  .fa-sidebar-brand {
+    @apply flex min-w-0 shrink-0 items-center gap-2.5 px-4;
+  }
+
+  .fa-icon-btn {
+    @apply cursor-pointer rounded-xl p-2 transition-colors duration-200;
+    color: var(--fa-muted);
+  }
+
+  .fa-icon-btn:hover {
+    background: var(--fa-surface-hover);
+    color: var(--fa-text);
+  }
+
+  .fa-theme-toggle {
+    @apply flex items-center rounded-xl p-0.5;
+    background: var(--fa-surface);
+    border: 1px solid var(--fa-border-subtle);
+  }
+
+  .fa-theme-toggle-btn {
+    @apply cursor-pointer rounded-lg p-1.5 transition-colors duration-200;
+  }
+
+  .fa-theme-toggle-btn[data-active='true'] {
+    background: var(--fa-surface-hover);
+    color: var(--fa-text);
+  }
+
+  .fa-theme-toggle-btn[data-active='false'] {
+    color: var(--fa-faint);
+  }
+
+  .fa-theme-toggle-btn[data-active='false']:hover {
+    color: var(--fa-muted);
+  }
+
+  .fa-sidebar-nav {
+    @apply flex w-full cursor-pointer items-center gap-2.5 rounded-xl px-3 py-2 text-sm transition-colors duration-200;
+    color: var(--fa-muted);
+  }
+
+  .fa-sidebar-nav:hover {
+    background: var(--fa-surface-hover);
+    color: var(--fa-text);
+  }
+
+  .fa-sidebar-nav-active {
+    background: var(--fa-surface);
+    color: var(--fa-text);
+  }
+
+  .fa-sidebar-tab {
+    @apply mb-0.5 flex cursor-pointer items-center gap-1 rounded-xl px-3 py-2 text-sm transition-colors duration-200;
+    color: var(--fa-muted);
+  }
+
+  .fa-sidebar-tab:hover {
+    background: var(--fa-surface-hover);
+    color: var(--fa-text);
+  }
+
+  .fa-sidebar-tab-active {
+    background: var(--fa-surface);
+    color: var(--fa-text);
+  }
+
+  .fa-hero {
+    @apply flex flex-1 flex-col items-center justify-center px-6 pb-32 text-center;
+  }
+
+  .fa-hero-icon {
+    @apply mb-6 flex h-16 w-16 items-center justify-center rounded-2xl;
+    background: var(--fa-surface);
+    border: 1px solid var(--fa-border-subtle);
+    color: var(--fa-muted);
+  }
+
+  .fa-hero-title {
+    @apply max-w-md text-2xl font-medium tracking-tight md:text-[1.75rem];
+    color: var(--fa-text);
+  }
+
+  .fa-hero-sub {
+    @apply mt-3 max-w-sm text-sm leading-relaxed;
+    color: var(--fa-faint);
+  }
+
+  .fa-composer-wrap {
+    @apply shrink-0 px-4 pb-6 pt-2 md:px-8;
+  }
+
+  .fa-composer {
+    @apply overflow-hidden transition-colors duration-200;
+    border-radius: var(--fa-radius-2xl);
+    border: 1px solid var(--fa-border-subtle);
+    background: var(--fa-composer-bg);
+    box-shadow: var(--fa-composer-shadow);
+  }
+
+  .fa-composer:focus-within {
+    border-color: color-mix(in srgb, var(--fa-accent) 35%, var(--fa-border));
+  }
+
+  .fa-composer-hint {
+    @apply truncate px-4 pt-3 text-xs;
+    color: var(--fa-accent);
+  }
+
+  .fa-quick-chip {
+    @apply max-w-full cursor-pointer break-words rounded-full px-3.5 py-1.5 text-left text-sm transition-colors duration-200;
+    border: 1px solid var(--fa-border-subtle);
+    background: var(--fa-surface);
+    color: var(--fa-text);
+  }
+
+  .fa-quick-chip:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--fa-accent) 40%, var(--fa-border));
+    background: var(--fa-surface-hover);
+  }
+
+  .fa-quick-chip:disabled {
+    @apply cursor-not-allowed opacity-40;
+  }
+
+  .fa-send-btn {
+    @apply flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full transition-opacity duration-200 disabled:cursor-not-allowed disabled:opacity-40;
+    background: #e0e0e0;
+    color: #161616;
+  }
+
+  [data-theme='light'] .fa-send-btn {
+    background: var(--fa-text);
+    color: var(--fa-bg);
+  }
+
+  .fa-send-btn:hover:not(:disabled) {
+    @apply opacity-90;
+  }
+
+  .fa-send-btn-stop {
+    background: var(--fa-danger);
+    color: #fff;
+  }
+
+  .fa-page {
+    @apply flex h-screen min-h-0 flex-col overflow-hidden;
+    background: var(--fa-main);
+    color: var(--fa-text);
+  }
+
+  /* 子页页头即标题栏：可拖拽，右侧为窗口控制按钮留位 */
+  .fa-page-header {
+    @apply flex h-12 shrink-0 items-center gap-3 px-4;
+    background: var(--fa-main);
+    -webkit-app-region: drag;
+  }
+
+  .fa-page-header button,
+  .fa-page-header a,
+  .fa-page-header input,
+  .fa-page-header [role='button'] {
+    -webkit-app-region: no-drag;
+  }
+
+  [data-platform='win32'] .fa-page-header {
+    padding-right: calc(var(--fa-window-controls-width) + 8px);
+  }
+
+  [data-platform='darwin'] .fa-page-header {
+    padding-left: 76px;
+  }
+
+  .fa-label {
+    @apply block text-sm font-medium;
+    color: var(--fa-text);
+  }
+
+  .fa-hint {
+    @apply text-xs;
+    color: var(--fa-faint);
+  }
+
+  .fa-input {
+    @apply w-full rounded-xl px-4 py-2.5 text-sm outline-none transition-colors duration-200;
+    background: var(--fa-surface);
+    border: 1px solid var(--fa-border);
+    color: var(--fa-text);
+  }
+
+  .fa-input:focus {
+    border-color: color-mix(in srgb, var(--fa-accent) 55%, transparent);
+  }
+
+  .fa-input:disabled {
+    @apply opacity-60;
+  }
+
+  .fa-btn-primary {
+    @apply cursor-pointer rounded-xl px-4 py-2.5 text-sm font-medium transition-opacity duration-200 disabled:cursor-not-allowed disabled:opacity-40;
+    background: var(--fa-text);
+    color: var(--fa-bg);
+  }
+
+  .fa-btn-primary:hover:not(:disabled) {
+    @apply opacity-90;
+  }
+
+  .fa-btn-ghost {
+    @apply cursor-pointer rounded-xl border px-4 py-2.5 text-sm transition-colors duration-200;
+    border-color: var(--fa-border);
+    color: var(--fa-muted);
+    background: transparent;
+  }
+
+  .fa-btn-ghost:hover {
+    background: var(--fa-surface-hover);
+    color: var(--fa-text);
+  }
+
+  .fa-card {
+    @apply rounded-xl border;
+    border-color: var(--fa-border);
+    background: var(--fa-surface);
+  }
+
+  .fa-link {
+    @apply inline-flex cursor-pointer items-center gap-1 text-xs transition-colors duration-200;
+    color: var(--fa-accent);
+  }
+
+  .fa-link:hover {
+    filter: brightness(1.15);
+  }
+
+  .fa-toggle-on {
+    background: var(--fa-accent);
+  }
+
+  .fa-toggle-off {
+    background: var(--fa-border);
+  }
+
+  /* 新闻中心：未读徽标，用于图标按钮角标与页头计数 */
+  .fa-news-badge {
+    @apply inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full px-1 text-[10px] font-semibold leading-none tabular-nums;
+    background: var(--fa-danger-strong);
+    color: #fff;
+  }
+
+  /* 新闻中心：新闻动态 / 订阅管理 页签 */
+  .fa-news-tabs {
+    @apply flex shrink-0 items-center gap-1 border-b px-4;
+    border-color: var(--fa-border-subtle);
+  }
+
+  .fa-news-tab {
+    @apply relative cursor-pointer px-3 py-2.5 text-sm transition-colors duration-200;
+    color: var(--fa-muted);
+  }
+
+  .fa-news-tab:hover {
+    color: var(--fa-text);
+  }
+
+  .fa-news-tab-active {
+    color: var(--fa-text);
+  }
+
+  .fa-news-tab-active::after {
+    content: '';
+    position: absolute;
+    left: 0.75rem;
+    right: 0.75rem;
+    bottom: -1px;
+    height: 2px;
+    border-radius: 9999px;
+    background: var(--fa-accent);
+  }
+
+  /* 新闻中心：单条新闻卡片 */
+  .fa-news-item {
+    @apply flex min-w-0 cursor-pointer flex-col gap-1.5 rounded-xl border px-4 py-3 text-left transition-colors duration-200;
+    border-color: var(--fa-border);
+    background: var(--fa-surface);
+  }
+
+  .fa-news-item:hover {
+    background: var(--fa-surface-hover);
+  }
+
+  .fa-news-item-unread {
+    border-color: color-mix(in srgb, var(--fa-accent) 35%, var(--fa-border));
+  }
+
+  .fa-news-dot {
+    @apply inline-block h-1.5 w-1.5 shrink-0 rounded-full;
+    background: var(--fa-accent);
+  }
+
+  /* 新闻中心：命中订阅 / 股票代码 等小标签 */
+  .fa-news-tag {
+    @apply inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[11px];
+    background: var(--fa-accent-soft);
+    color: var(--fa-accent);
+  }
+
+  /* 新闻中心：订阅弹窗中的关键词标签 */
+  .fa-news-chip {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs;
+    background: var(--fa-surface-hover);
+    color: var(--fa-text);
+  }
+
+  /* 新闻中心：订阅弹窗中的来源多选项 */
+  .fa-news-source-option {
+    @apply flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm transition-colors duration-200;
+    border-color: var(--fa-border);
+    color: var(--fa-muted);
+  }
+
+  .fa-news-source-option:hover {
+    background: var(--fa-surface-hover);
+  }
+
+  .fa-news-source-option[data-checked='true'] {
+    border-color: color-mix(in srgb, var(--fa-accent) 45%, var(--fa-border));
+    background: var(--fa-accent-soft);
+    color: var(--fa-text);
   }
 }

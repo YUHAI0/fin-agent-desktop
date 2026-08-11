@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, ExternalLink } from 'lucide-react'
+import FaSelect from './FaSelect'
+import SubPageShell from './SubPageShell'
 
 const PROVIDER_PRESETS: Record<string, { label: string; baseUrl: string; model: string; keyUrl: string; color: string; keyPlaceholder: string }> = {
   deepseek: { label: 'DeepSeek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-chat', keyUrl: 'https://platform.deepseek.com/api_keys', color: 'blue', keyPlaceholder: 'sk-...' },
@@ -9,6 +11,16 @@ const PROVIDER_PRESETS: Record<string, { label: string; baseUrl: string; model: 
   qwen: { label: 'Qwen (通义千问)', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus', keyUrl: 'https://dashscope.console.aliyun.com/apiKey', color: 'orange', keyPlaceholder: 'sk-...' },
   siliconflow: { label: 'SiliconFlow (硅基流动)', baseUrl: 'https://api.siliconflow.cn/v1', model: 'deepseek-ai/DeepSeek-V3', keyUrl: 'https://cloud.siliconflow.cn/account/ak', color: 'cyan', keyPlaceholder: 'sk-...' },
   openai: { label: 'OpenAI / 自定义', baseUrl: '', model: '', keyUrl: '', color: 'gray', keyPlaceholder: 'sk-...' },
+}
+
+const NEWS_POLL_INTERVAL_OPTIONS = [5, 10, 15, 30] as const
+const DEFAULT_NEWS_POLL_INTERVAL = 5
+
+function normalizeNewsPollInterval(value: unknown): 5 | 10 | 15 | 30 {
+  const num = Number(value)
+  return (NEWS_POLL_INTERVAL_OPTIONS as readonly number[]).includes(num)
+    ? (num as 5 | 10 | 15 | 30)
+    : DEFAULT_NEWS_POLL_INTERVAL
 }
 
 const ConfigView: React.FC = () => {
@@ -31,6 +43,7 @@ const ConfigView: React.FC = () => {
   const [autoLaunch, setAutoLaunch] = useState(false)
   const [alertInterval, setAlertInterval] = useState('10')
   const [tradingHoursOnly, setTradingHoursOnly] = useState(true)
+  const [newsPollInterval, setNewsPollInterval] = useState(String(DEFAULT_NEWS_POLL_INTERVAL))
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [shortcutStatus, setShortcutStatus] = useState<{valid: boolean, message: string} | null>(null)
@@ -68,6 +81,7 @@ const ConfigView: React.FC = () => {
           setEmailReceiver(config.email_receiver || '')
           setAlertInterval(String(config.alert_poll_interval_minutes ?? 10))
           setTradingHoursOnly(config.alert_trading_hours_only ?? true)
+          setNewsPollInterval(String(normalizeNewsPollInterval(config.news_poll_interval_minutes)))
         }
         const isAutoLaunch = await window.api.getAutoLaunch()
         setAutoLaunch(isAutoLaunch)
@@ -101,7 +115,8 @@ const ConfigView: React.FC = () => {
         email_password: emailPassword,
         email_receiver: emailReceiver,
         alert_poll_interval_minutes: Math.min(Math.max(Number(alertInterval) || 10, 1), 120),
-        alert_trading_hours_only: tradingHoursOnly
+        alert_trading_hours_only: tradingHoursOnly,
+        news_poll_interval_minutes: normalizeNewsPollInterval(newsPollInterval)
       }
 
       const result = await window.api.saveConfig(config)
@@ -182,49 +197,53 @@ const ConfigView: React.FC = () => {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-gray-900 text-white drag-region overflow-y-auto">
-      <div className="flex items-center gap-4 px-4 py-3 border-b border-gray-800 bg-gray-900/50 backdrop-blur sticky top-0 z-10">
+    <SubPageShell>
+      <div className="fa-page-header sticky top-0 z-10 shrink-0">
         <button
+          type="button"
           onClick={() => navigate('/chat')}
-          className="text-gray-400 hover:text-white transition-colors p-1 rounded hover:bg-gray-800 no-drag"
+          className="cursor-pointer rounded-lg p-2 text-[var(--fa-muted)] transition-colors duration-200 hover:bg-[var(--fa-surface-hover)] hover:text-[var(--fa-text)]"
           title="返回聊天"
+          aria-label="返回聊天"
         >
           <ArrowLeft size={20} />
         </button>
-        <div className="font-semibold text-lg">配置</div>
+        <div className="text-sm font-semibold">设置</div>
       </div>
 
-      <div className="p-8 no-drag max-w-2xl mx-auto w-full">
-        <p className="mb-6 text-gray-400">请配置必要的 API 密钥以继续使用。</p>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="mx-auto w-full max-w-2xl p-8">
+        <p className="mb-6 text-sm text-[var(--fa-muted)]">请配置必要的 API 密钥与系统选项。</p>
 
         {error && (
-          <div className="mb-6 bg-red-900/50 border border-red-800 text-red-200 px-4 py-3 rounded-lg">
+          <div className="mb-6 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-red-300">
             {error}
           </div>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="space-y-2">
-            <label className="block text-sm font-medium text-gray-300">行情数据源</label>
-            <select
+            <label className="fa-label">行情数据源</label>
+            <FaSelect
               value={dataSource}
-              onChange={(e) => setDataSource(e.target.value as 'akshare' | 'tushare')}
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
-            >
-              <option value="akshare">akshare（免费，推荐）</option>
-              <option value="tushare">tushare（需 Token）</option>
-            </select>
-            <p className="text-xs text-gray-500">
+              aria-label="行情数据源"
+              onChange={(v) => setDataSource(v as 'akshare' | 'tushare')}
+              options={[
+                { value: 'akshare', label: 'akshare（免费）' },
+                { value: 'tushare', label: 'tushare（需 Token，推荐）' }
+              ]}
+            />
+            <p className="fa-hint">
               akshare 无需注册即可使用，覆盖 A 股基础信息、日线、实时行情、每日指标、利润表与指数行情。
             </p>
           </div>
           <div className="space-y-2">
             <div className="flex items-center gap-2">
-              <label className="block text-sm font-medium text-gray-300">Tushare Token</label>
+              <label className="fa-label">Tushare Token</label>
               <button
                 type="button"
                 onClick={() => window.api.openExternal('https://tushare.pro/register')}
-                className="text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1 text-xs"
+                className="fa-link"
                 title="前往 Tushare 官网获取 Token"
               >
                 <ExternalLink size={14} />
@@ -235,36 +254,36 @@ const ConfigView: React.FC = () => {
               type="text"
               value={tushareToken}
               onChange={(e) => setTushareToken(e.target.value)}
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
+              className="fa-input"
               placeholder="选填，输入 Tushare Token"
             />
-            <p className="text-xs text-gray-500">
+            <p className="fa-hint">
               选填。填写后可解锁选股筛选、港美股、ETF、可转债、期货与宏观数据等增强功能；即便数据源选择 akshare，此处的 Token 依然生效。
             </p>
           </div>
 
           <div className="space-y-2">
-            <label className="block text-sm font-medium text-gray-300">LLM 提供商</label>
-            <select
+            <label className="fa-label">LLM 提供商</label>
+            <FaSelect
               value={provider}
-              onChange={(e) => handleProviderChange(e.target.value)}
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
-            >
-              {Object.entries(PROVIDER_PRESETS).map(([key, preset]) => (
-                <option key={key} value={key}>{preset.label}</option>
-              ))}
-            </select>
+              aria-label="LLM 提供商"
+              onChange={handleProviderChange}
+              options={Object.entries(PROVIDER_PRESETS).map(([key, preset]) => ({
+                value: key,
+                label: preset.label
+              }))}
+            />
           </div>
 
           {provider === 'deepseek' ? (
-            <div className="space-y-4 border-l-2 border-blue-600 pl-4">
+            <div className="space-y-4 border-l-2 border-[var(--fa-accent)] pl-4">
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
-                  <label className="block text-sm font-medium text-gray-300">DeepSeek API Key</label>
+                  <label className="fa-label">DeepSeek API Key</label>
                   <button
                     type="button"
                     onClick={() => window.api.openExternal('https://platform.deepseek.com/api_keys')}
-                    className="text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1 text-xs"
+                    className="fa-link"
                     title="前往 DeepSeek 平台获取 API Key"
                   >
                     <ExternalLink size={14} />
@@ -275,28 +294,28 @@ const ConfigView: React.FC = () => {
                   type="password"
                   value={deepseekKey}
                   onChange={(e) => setDeepseekKey(e.target.value)}
-                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
+                  className="fa-input"
                   placeholder="sk-..."
                   required
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">
                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-gray-300">基础 URL</label>
+                    <label className="fa-label">基础 URL</label>
                     <input
                       type="text"
                       value={deepseekBase}
                       onChange={(e) => setDeepseekBase(e.target.value)}
-                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="fa-input"
                     />
                  </div>
                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-gray-300">模型</label>
+                    <label className="fa-label">模型</label>
                     <input
                       type="text"
                       value={deepseekModel}
                       onChange={(e) => setDeepseekModel(e.target.value)}
-                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="fa-input"
                     />
                  </div>
               </div>
@@ -311,14 +330,14 @@ const ConfigView: React.FC = () => {
             }`}>
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
-                  <label className="block text-sm font-medium text-gray-300">
+                  <label className="fa-label">
                     {PROVIDER_PRESETS[provider]?.label || provider} API Key
                   </label>
                   {PROVIDER_PRESETS[provider]?.keyUrl && (
                     <button
                       type="button"
                       onClick={() => window.api.openExternal(PROVIDER_PRESETS[provider].keyUrl)}
-                      className="text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1 text-xs"
+                      className="fa-link"
                       title="前往平台获取 API Key"
                     >
                       <ExternalLink size={14} />
@@ -330,29 +349,29 @@ const ConfigView: React.FC = () => {
                   type="password"
                   value={openaiKey}
                   onChange={(e) => setOpenaiKey(e.target.value)}
-                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
+                  className="fa-input"
                   placeholder={PROVIDER_PRESETS[provider]?.keyPlaceholder || 'sk-...'}
                   required
                 />
               </div>
                <div className="grid grid-cols-2 gap-4">
                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-gray-300">基础 URL</label>
+                    <label className="fa-label">基础 URL</label>
                     <input
                       type="text"
                       value={openaiBase}
                       onChange={(e) => setOpenaiBase(e.target.value)}
-                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="fa-input"
                       placeholder="例如：https://api.openai.com/v1"
                     />
                  </div>
                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-gray-300">模型</label>
+                    <label className="fa-label">模型</label>
                     <input
                       type="text"
                       value={openaiModel}
                       onChange={(e) => setOpenaiModel(e.target.value)}
-                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="fa-input"
                       placeholder="例如：gpt-4"
                     />
                  </div>
@@ -360,10 +379,10 @@ const ConfigView: React.FC = () => {
             </div>
           )}
 
-          <div className="space-y-2 pt-6 border-t border-gray-800">
-             <h3 className="text-lg font-medium text-gray-200">系统</h3>
+          <div className="space-y-2 border-t border-[var(--fa-border-subtle)] pt-6">
+             <h3 className="text-base font-medium text-[var(--fa-text)]">系统</h3>
              <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-300">唤醒快捷键</label>
+                <label className="fa-label">唤醒快捷键</label>
                 <input
                   type="text"
                   value={wakeUpShortcut}
@@ -371,14 +390,14 @@ const ConfigView: React.FC = () => {
                   onKeyDown={handleShortcutKeyDown}
                   onFocus={handleShortcutFocus}
                   onBlur={handleShortcutBlur}
-                  className={`w-full bg-gray-800 border ${shortcutStatus && !shortcutStatus.valid ? 'border-red-500' : 'border-gray-700'} rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer hover:bg-gray-750`}
+                  className={`fa-input cursor-pointer ${shortcutStatus && !shortcutStatus.valid ? '!border-red-500' : ''}`}
                   placeholder="点击此处并按下按键（例如：Ctrl+Alt+Q）"
                   title="点击以聚焦并输入您的快捷键"
                 />
                 <div className="flex justify-between items-center text-xs">
-                    <p className="text-gray-500">点击输入框并按下按键组合。Backspace/Delete 清除。</p>
+                    <p className="fa-hint">点击输入框并按下按键组合。Backspace/Delete 清除。</p>
                     {shortcutStatus && (
-                        <span className={shortcutStatus.valid ? 'text-green-500' : 'text-red-400'}>
+                        <span className={shortcutStatus.valid ? 'text-emerald-400' : 'text-red-400'}>
                             {shortcutStatus.message === 'Shortcut is already in use by another application' 
                               ? '快捷键已被其他应用程序使用'
                               : shortcutStatus.message === 'Shortcut available'
@@ -390,8 +409,8 @@ const ConfigView: React.FC = () => {
              </div>
              <div className="flex items-center justify-between py-2">
                 <div>
-                  <label className="block text-sm font-medium text-gray-300">开机自动启动</label>
-                  <p className="text-xs text-gray-500">系统启动时自动运行 Fin-Agent</p>
+                  <label className="fa-label">开机自动启动</label>
+                  <p className="fa-hint">系统启动时自动运行 Fin-Agent</p>
                 </div>
                 <button
                   type="button"
@@ -399,13 +418,13 @@ const ConfigView: React.FC = () => {
                     const result = await window.api.setAutoLaunch(!autoLaunch)
                     setAutoLaunch(result)
                   }}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${autoLaunch ? 'bg-blue-600' : 'bg-gray-600'}`}
+                  className={`relative inline-flex h-6 w-11 cursor-pointer items-center rounded-full transition-colors ${autoLaunch ? 'fa-toggle-on' : 'fa-toggle-off'}`}
                 >
                   <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${autoLaunch ? 'translate-x-6' : 'translate-x-1'}`} />
                 </button>
              </div>
              <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-300">价格提醒轮询间隔（分钟）</label>
+                <label className="fa-label">价格提醒轮询间隔（分钟）</label>
                 <input
                   type="number"
                   min={1}
@@ -413,82 +432,97 @@ const ConfigView: React.FC = () => {
                   value={alertInterval}
                   onChange={(e) => setAlertInterval(e.target.value)}
                   onBlur={() => setAlertInterval(String(Math.min(Math.max(Number(alertInterval) || 10, 1), 120)))}
-                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
+                  className="fa-input"
                 />
-                <p className="text-xs text-gray-500">取值范围 1–120 分钟。修改后下一个轮询周期自动生效，无需重启。</p>
+                <p className="fa-hint">取值范围 1–120 分钟。修改后下一个轮询周期自动生效，无需重启。</p>
              </div>
              <div className="flex items-center justify-between py-2">
                 <div>
-                  <label className="block text-sm font-medium text-gray-300">仅在交易时段轮询</label>
-                  <p className="text-xs text-gray-500">
+                  <label className="fa-label">仅在交易时段轮询</label>
+                  <p className="fa-hint">
                     开启后仅在交易日 9:15–11:30 与 12:55–15:05 检查。关闭后将 7×24 小时轮询。
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => setTradingHoursOnly(!tradingHoursOnly)}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${tradingHoursOnly ? 'bg-blue-600' : 'bg-gray-600'}`}
+                  className={`relative inline-flex h-6 w-11 cursor-pointer items-center rounded-full transition-colors ${tradingHoursOnly ? 'fa-toggle-on' : 'fa-toggle-off'}`}
                 >
                   <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${tradingHoursOnly ? 'translate-x-6' : 'translate-x-1'}`} />
                 </button>
              </div>
+             <div className="space-y-2">
+                <label className="fa-label">新闻轮询频率</label>
+                <FaSelect
+                  value={newsPollInterval}
+                  aria-label="新闻轮询频率"
+                  onChange={setNewsPollInterval}
+                  options={[
+                    { value: '5', label: '每 5 分钟' },
+                    { value: '10', label: '每 10 分钟' },
+                    { value: '15', label: '每 15 分钟' },
+                    { value: '30', label: '每 30 分钟' }
+                  ]}
+                />
+                <p className="fa-hint">新闻监控独立运行，不受交易时段限制，按此频率 7×24 小时轮询订阅的新闻源。</p>
+             </div>
           </div>
 
-          <div className="space-y-4 pt-6 border-t border-gray-800">
-            <h3 className="text-lg font-medium text-gray-200">邮件通知（可选）</h3>
+          <div className="space-y-4 border-t border-[var(--fa-border-subtle)] pt-6">
+            <h3 className="text-base font-medium text-[var(--fa-text)]">邮件通知（可选）</h3>
             
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-300">SMTP 服务器</label>
+                <label className="fa-label">SMTP 服务器</label>
                 <input
                   type="text"
                   value={emailServer}
                   onChange={(e) => setEmailServer(e.target.value)}
-                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
+                  className="fa-input"
                   placeholder="e.g. smtp.gmail.com"
                 />
               </div>
               <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-300">SMTP 端口</label>
+                <label className="fa-label">SMTP 端口</label>
                 <input
                   type="text"
                   value={emailPort}
                   onChange={(e) => setEmailPort(e.target.value)}
-                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
+                  className="fa-input"
                   placeholder="465"
                 />
               </div>
             </div>
 
             <div className="space-y-2">
-              <label className="block text-sm font-medium text-gray-300">发件人邮箱</label>
+              <label className="fa-label">发件人邮箱</label>
               <input
                 type="email"
                 value={emailSender}
                 onChange={(e) => setEmailSender(e.target.value)}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
+                className="fa-input"
                 placeholder="sender@example.com"
               />
             </div>
 
             <div className="space-y-2">
-              <label className="block text-sm font-medium text-gray-300">发件人密码 / 应用密码</label>
+              <label className="fa-label">发件人密码 / 应用密码</label>
               <input
                 type="password"
                 value={emailPassword}
                 onChange={(e) => setEmailPassword(e.target.value)}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
+                className="fa-input"
                 placeholder="********"
               />
             </div>
 
             <div className="space-y-2">
-              <label className="block text-sm font-medium text-gray-300">收件人邮箱（默认为发件人）</label>
+              <label className="fa-label">收件人邮箱（默认为发件人）</label>
               <input
                 type="email"
                 value={emailReceiver}
                 onChange={(e) => setEmailReceiver(e.target.value)}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
+                className="fa-input"
                 placeholder="receiver@example.com"
               />
             </div>
@@ -497,20 +531,21 @@ const ConfigView: React.FC = () => {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg px-6 py-3 font-medium transition-colors"
+            className="fa-btn-primary w-full py-3"
           >
             {loading ? '保存中...' : '保存配置'}
           </button>
           <button
             type="button"
             onClick={() => navigate('/about')}
-            className="w-full mt-3 px-4 py-2 text-sm text-gray-400 border border-gray-700 rounded-lg hover:bg-gray-800 transition-colors"
+            className="fa-btn-ghost mt-3 w-full"
           >
             关于 / 支持本项目
           </button>
         </form>
       </div>
-    </div>
+      </div>
+    </SubPageShell>
   )
 }
 

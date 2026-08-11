@@ -4,12 +4,22 @@ import App from './App'
 import './index.css'
 import { HashRouter } from 'react-router-dom'
 import { ChatProvider } from './contexts/ChatContext'
+import { ThemeProvider } from './contexts/ThemeContext'
+import { AppDialogProvider } from './contexts/AppDialogContext'
+
+if (window.api?.platform) {
+  document.documentElement.dataset.platform = window.api.platform
+}
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <HashRouter>
-    <ChatProvider>
-      <App />
-    </ChatProvider>
+    <ThemeProvider>
+      <AppDialogProvider>
+        <ChatProvider>
+          <App />
+        </ChatProvider>
+      </AppDialogProvider>
+    </ThemeProvider>
   </HashRouter>
 )
 

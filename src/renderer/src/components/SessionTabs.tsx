@@ -1,4 +1,5 @@
 import React from 'react'
+import { History, MessageSquarePlus, X } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
 
 interface SessionTabsProps {
@@ -9,51 +10,77 @@ const SessionTabs: React.FC<SessionTabsProps> = ({ onOpenDrawer }) => {
   const { openTabs, activeSessionId, openSession, closeTab, newSession } = useChat()
 
   return (
-    <div className="flex items-end gap-1 px-2 h-9 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 overflow-x-auto">
-      <button
-        onClick={onOpenDrawer}
-        title="历史会话"
-        className="px-2 py-1 text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 shrink-0"
-      >
-        ☰
-      </button>
+    <aside className="flex h-full w-[260px] shrink-0 flex-col bg-[var(--fa-sidebar)]">
+      <div className="fa-sidebar-brand fa-titlebar-row fa-titlebar-row--reserve-start">
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--fa-surface)] text-[11px] font-semibold tracking-tight text-[var(--fa-text)]">
+          FA
+        </div>
+        <span className="truncate text-sm font-medium tracking-tight text-[var(--fa-text)]">
+          Fin-Agent
+        </span>
+      </div>
 
-      {openTabs.map((tab) => {
-        const active = tab.id === activeSessionId
-        return (
-          <div
-            key={tab.id}
-            onClick={() => void openSession(tab.id)}
-            className={[
-              'group flex items-center gap-1 px-3 py-1 rounded-t text-xs cursor-pointer shrink-0 max-w-[160px]',
-              active
-                ? 'bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 border border-b-0 border-gray-200 dark:border-gray-700'
-                : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
-            ].join(' ')}
-          >
-            <span className="truncate">{tab.title}</span>
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                closeTab(tab.id)
+      <nav className="space-y-0.5 px-3 pb-2 pt-2" aria-label="主导航">
+        <button
+          type="button"
+          onClick={() => void newSession()}
+          className="fa-sidebar-nav w-full text-[var(--fa-text)]"
+        >
+          <MessageSquarePlus size={16} className="shrink-0 opacity-70" aria-hidden />
+          新对话
+        </button>
+        <button type="button" onClick={onOpenDrawer} className="fa-sidebar-nav w-full">
+          <History size={16} className="shrink-0 opacity-70" aria-hidden />
+          历史会话
+        </button>
+      </nav>
+
+      <div className="mx-4 h-px bg-[var(--fa-border-subtle)]" />
+
+      <div className="px-4 pt-4 pb-2 text-[11px] font-medium tracking-wide text-[var(--fa-faint)]">
+        会话
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-3 pb-4">
+        {openTabs.length === 0 && (
+          <p className="px-2 py-6 text-center text-xs leading-relaxed text-[var(--fa-faint)]">
+            暂无打开的会话
+          </p>
+        )}
+        {openTabs.map((tab) => {
+          const active = tab.id === activeSessionId
+          return (
+            <div
+              key={tab.id}
+              role="button"
+              tabIndex={0}
+              onClick={() => void openSession(tab.id)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  void openSession(tab.id)
+                }
               }}
-              className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500"
-              title="关闭标签"
+              className={['group fa-sidebar-tab', active ? 'fa-sidebar-tab-active' : ''].join(' ')}
             >
-              ×
-            </button>
-          </div>
-        )
-      })}
-
-      <button
-        onClick={() => void newSession()}
-        title="新建会话"
-        className="px-2 py-1 text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 shrink-0"
-      >
-        ＋
-      </button>
-    </div>
+              <span className="min-w-0 flex-1 truncate">{tab.title}</span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  closeTab(tab.id)
+                }}
+                className="shrink-0 rounded-lg p-0.5 text-[var(--fa-faint)] opacity-0 transition-opacity hover:text-[var(--fa-danger)] group-hover:opacity-100 focus-visible:opacity-100"
+                title="关闭标签"
+                aria-label={`关闭会话 ${tab.title}`}
+              >
+                <X size={14} />
+              </button>
+            </div>
+          )
+        })}
+      </div>
+    </aside>
   )
 }
 

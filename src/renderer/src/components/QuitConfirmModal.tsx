@@ -15,45 +15,45 @@ const QuitConfirmModal: React.FC<QuitConfirmModalProps> = ({
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fade-in">
-      <div className="bg-gray-800 rounded-2xl shadow-2xl border border-gray-700 w-full max-w-md mx-4 overflow-hidden transform transition-all animate-scale-in">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-700 bg-gray-800/50">
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/55 p-4 backdrop-blur-[2px] no-drag animate-fade-in">
+      <div
+        className="mx-4 w-full max-w-md overflow-hidden rounded-2xl border border-[var(--fa-border)] bg-[var(--fa-sidebar)] shadow-2xl animate-scale-in"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="quit-confirm-title"
+      >
+        <div className="flex items-center justify-between border-b border-[var(--fa-border-subtle)] px-5 py-4">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-orange-500/20 rounded-lg">
-              <AlertTriangle className="w-5 h-5 text-orange-500" />
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-500/15 text-amber-400">
+              <AlertTriangle className="h-5 w-5" />
             </div>
-            <h3 className="text-lg font-semibold text-white">确认退出</h3>
+            <h3 id="quit-confirm-title" className="text-base font-semibold text-[var(--fa-text)]">
+              确认退出
+            </h3>
           </div>
           <button
+            type="button"
             onClick={onCancel}
-            className="text-gray-400 hover:text-white transition-colors p-1 rounded hover:bg-gray-700"
+            className="cursor-pointer rounded-lg p-1.5 text-[var(--fa-muted)] transition-colors hover:bg-[var(--fa-surface-hover)] hover:text-[var(--fa-text)]"
+            aria-label="关闭"
           >
-            <X className="w-5 h-5" />
+            <X className="h-5 w-5" />
           </button>
         </div>
 
-        {/* Content */}
-        <div className="px-6 py-5">
-          <p className="text-gray-300 leading-relaxed mb-1">
-            Fin-Agent 正在生成回复
-          </p>
-          <p className="text-gray-400 text-sm mt-3">
-            是否要停止生成并退出应用？
-          </p>
+        <div className="px-5 py-4">
+          <p className="text-[var(--fa-text)]">Fin-Agent 正在生成回复</p>
+          <p className="mt-2 text-sm text-[var(--fa-muted)]">是否要停止生成并退出应用？</p>
         </div>
 
-        {/* Footer */}
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-700 bg-gray-800/50">
-          <button
-            onClick={onCancel}
-            className="px-4 py-2 text-gray-300 hover:text-white transition-colors rounded-lg hover:bg-gray-700 font-medium"
-          >
+        <div className="flex items-center justify-end gap-2 border-t border-[var(--fa-border-subtle)] bg-[var(--fa-surface)]/40 px-4 py-3">
+          <button type="button" onClick={onCancel} className="fa-btn-ghost px-4 py-2 text-sm">
             取消
           </button>
           <button
+            type="button"
             onClick={onConfirm}
-            className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors font-medium"
+            className="cursor-pointer rounded-xl bg-[var(--fa-danger)] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90"
           >
             继续退出
           </button>

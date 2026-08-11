@@ -1,7 +1,8 @@
 import type { Message } from '../contexts/ChatContext'
+import type { QuickReplyOption } from './extractReplyQuickOptions'
+import { ensureQuickReplyOptions } from './extractReplyQuickOptions'
 
-/** 须与 extractReplyQuickOptions 与 Python system prompt 中字符串一致 */
-const FIN_AGENT_CHOICES_KEY = 'FIN_AGENT_CHOICES_JSON'
+export const FIN_AGENT_CHOICES_KEY = 'FIN_AGENT_CHOICES_JSON'
 
 const WELCOME_CHOICES = [
   { label: '茅台现价', send: '贵州茅台现在股价多少？' },
@@ -12,30 +13,39 @@ const WELCOME_CHOICES = [
   { label: '今日宏观', send: '今天需要关注的宏观与政策要点有哪些？' }
 ] as const
 
-/**
- * 首次进入或清空历史后展示的本地问候（不调用 LLM），末尾带 FIN_AGENT_CHOICES_JSON 供快捷按钮解析。
- */
+/** 新对话空状态下的默认快捷语句 */
+export function getDefaultQuickReplyOptions(): QuickReplyOption[] {
+  return ensureQuickReplyOptions(
+    WELCOME_CHOICES.map((c, i) => ({
+      id: `welcome-${i}`,
+      label: c.label,
+      sendText: c.send
+    }))
+  )
+}
+
+/** 旧版本地欢迎语（含 Fin-Agent 介绍），加载历史时归一化为空对话 */
+export function isLegacyWelcomeOnlyMessages(messages: { role: string; content?: string }[]): boolean {
+  if (messages.length !== 1) return false
+  const m = messages[0]
+  return m.role === 'assistant' && (m.content || '').includes('Fin-Agent')
+}
+
+export function normalizeSessionMessages(messages: Message[]): Message[] {
+  if (messages.length === 0) return messages
+  if (isLegacyWelcomeOnlyMessages([messages[0]])) {
+    return messages.slice(1)
+  }
+  return messages
+}
+
+/** @deprecated 新对话不再注入欢迎消息，保留供旧数据识别 */
 export function createWelcomeAgentMessage(): Message {
   const choicesJson = JSON.stringify([...WELCOME_CHOICES])
   const machineLine = `${FIN_AGENT_CHOICES_KEY} ${choicesJson}`
-
-  const md = `你好，我是 **Fin-Agent**，你的本地金融助手。
-
-我可以帮你做这些事：
-
-- **行情与 K 线**：A 股 / 港股 / 美股 / ETF / 期货等报价与日线走势  
-- **财务与估值**：利润表、PE/PB、市值等基本面数据  
-- **技术与筛选**：技术指标、形态、条件选股、长尾标的发现  
-- **组合与提醒**：持仓查询、价格/涨跌幅邮件提醒  
-- **策略回测**：均线、MACD、RSI 等简单策略的历史表现与收益曲线  
-
-你可以**直接点下面快捷语句**，或在底部输入框用自然语言提问。首次使用请先完成 **设置** 里的 Tushare Token 与模型配置。
-
-${machineLine}`
-
   return {
     role: 'assistant',
-    content: md,
-    blocks: [{ type: 'text', content: md }]
+    content: machineLine,
+    blocks: [{ type: 'text', content: machineLine }]
   }
 }

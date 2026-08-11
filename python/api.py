@@ -66,6 +66,17 @@ try:
     from fin_agent.scheduler import TaskScheduler
     from fin_agent import session_store
     from fin_agent.portfolio import PortfolioManager
+    from fin_agent.news import SUPPORTED_NEWS_SOURCES
+    from fin_agent.news_store import (
+        SUBSCRIPTION_TYPES,
+        NewsSubscriptionStore,
+        NotifiedNewsStore,
+    )
+    from fin_agent.news_monitor import (
+        get_news_monitor,
+        start_news_monitor,
+        stop_news_monitor,
+    )
 except ImportError as e:
     print(f"Error importing fin_agent: {e}", file=sys.stderr)
     sys.exit(1)
@@ -76,6 +87,203 @@ agent = None
 # Notification queue for desktop notifications
 notification_queue = []
 notification_lock = threading.Lock()
+# news_id -> 入队时间戳；只要还在这个集合里就说明该新闻通知已经在
+# notification_queue 里等待桌面端 ACK，避免每轮监控周期重复入队同一条。
+_ack_pending_news_ids = {}
+# 队列硬上限：桌面端长期未启动/未 ACK 时兜底，避免无限堆积。超出后按入队
+# 顺序丢弃最旧的条目；被丢弃的新闻仍保留在 NotifiedNewsStore 里
+# notification_pending=True，下一轮监控周期会重新尝试入队。
+_NOTIFICATION_QUEUE_MAX = 500
+
+
+def _as_id_list(value):
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value] if value.strip() else []
+    if isinstance(value, (list, tuple, set)):
+        return [str(v).strip() for v in value if str(v).strip()]
+    text = str(value).strip()
+    return [text] if text else []
+
+
+def _drop_oldest_notifications_if_over_capacity():
+    while len(notification_queue) > _NOTIFICATION_QUEUE_MAX:
+        dropped = notification_queue.pop(0)
+        for news_id in _as_id_list(dropped.get("news_ids")):
+            _ack_pending_news_ids.pop(news_id, None)
+        news_id = dropped.get("news_id")
+        if news_id:
+            _ack_pending_news_ids.pop(news_id, None)
+        sys.stderr.write(
+            f"[Notification] queue over capacity ({_NOTIFICATION_QUEUE_MAX}), "
+            f"dropped oldest notification_id={dropped.get('notification_id')}\n"
+        )
+
+
+def enqueue_notification(payload):
+    """把新闻 digest 展开为可点击的桌面通知，不经由本机 HTTP 自调用。
+
+    返回值约定（供 NewsMonitor._run_notification_sink 判断能否标记 dispatched）：
+    - True：旧版系统通知（价格提醒等），无需 ACK，入队即视为已投递；
+    - {"ack_required": True}：新闻通知只是入队，真正的“已送达”以桌面端
+      调用 POST /notifications/ack 为准，调用方不得据此标记 dispatched。
+
+    展开规则：
+    1. 同一新闻命中多个订阅只保留一条，主订阅取首次出现；
+    2. 按主订阅聚合：本轮仅 1 条 → 直接展示标题；
+       同一订阅本轮 ≥2 条 → 合并为「新增 N 条新闻：代表标题」。
+    """
+    if payload.get("type") != "news_digest":
+        with notification_lock:
+            notification_queue.append(dict(payload))
+            _drop_oldest_notifications_if_over_capacity()
+        return True
+
+    # 先按 news_id 去重，保留全部命中订阅；主订阅 = 首次出现的订阅。
+    by_news_id = {}
+    for group in payload.get("groups") or []:
+        subscription_id = group.get("subscription_id")
+        subscription_name = group.get("subscription_name") or "新闻订阅"
+        for item in group.get("items") or []:
+            news_id = item.get("id")
+            if not news_id:
+                continue
+            entry = by_news_id.setdefault(news_id, {
+                "item": item,
+                "subscription_ids": [],
+                "subscription_names": [],
+            })
+            if subscription_id and subscription_id not in entry["subscription_ids"]:
+                entry["subscription_ids"].append(subscription_id)
+            if subscription_name and subscription_name not in entry["subscription_names"]:
+                entry["subscription_names"].append(subscription_name)
+
+    # 再按主订阅聚合，用于单条/合并通知决策。
+    by_primary_subscription = {}
+    for news_id, entry in by_news_id.items():
+        subscription_ids = entry["subscription_ids"]
+        subscription_names = entry["subscription_names"]
+        primary_id = subscription_ids[0] if subscription_ids else None
+        primary_name = subscription_names[0] if subscription_names else "新闻订阅"
+        bucket_key = primary_id or f"__ungrouped__:{news_id}"
+        bucket = by_primary_subscription.setdefault(bucket_key, {
+            "subscription_id": primary_id,
+            "subscription_name": primary_name,
+            "entries": [],
+        })
+        bucket["entries"].append({
+            "news_id": news_id,
+            "item": entry["item"],
+            "subscription_ids": subscription_ids,
+            "subscription_names": subscription_names,
+        })
+
+    with notification_lock:
+        now = time.time()
+        for bucket in by_primary_subscription.values():
+            fresh_entries = [
+                entry for entry in bucket["entries"]
+                if entry["news_id"] not in _ack_pending_news_ids
+            ]
+            if not fresh_entries:
+                continue
+
+            subscription_id = bucket["subscription_id"]
+            subscription_name = bucket["subscription_name"] or "新闻订阅"
+
+            if len(fresh_entries) == 1:
+                entry = fresh_entries[0]
+                news_id = entry["news_id"]
+                item = entry["item"]
+                subscription_ids = entry["subscription_ids"]
+                notification_queue.append({
+                    "notification_id": f"news:{news_id}",
+                    "notification_ids": [f"news:{news_id}"],
+                    "type": "news",
+                    "title": subscription_name,
+                    "body": item.get("title") or item.get("summary") or "有新的订阅新闻",
+                    "timestamp": now,
+                    "news_id": news_id,
+                    "news_ids": [news_id],
+                    "merged": False,
+                    "subscription_id": subscription_id,
+                    "subscription_ids": subscription_ids,
+                    "source": item.get("source"),
+                    "url": item.get("url"),
+                    "ack_required": True,
+                })
+                _ack_pending_news_ids[news_id] = now
+                continue
+
+            news_ids = [entry["news_id"] for entry in fresh_entries]
+            notification_ids = [f"news:{news_id}" for news_id in news_ids]
+            first_item = fresh_entries[0]["item"]
+            first_title = (
+                first_item.get("title")
+                or first_item.get("summary")
+                or "有新的订阅新闻"
+            )
+            all_subscription_ids = []
+            for entry in fresh_entries:
+                for sid in entry["subscription_ids"]:
+                    if sid not in all_subscription_ids:
+                        all_subscription_ids.append(sid)
+            merge_token = subscription_id or news_ids[0]
+            notification_queue.append({
+                "notification_id": f"news-merge:{merge_token}:{int(now * 1000)}",
+                "notification_ids": notification_ids,
+                "type": "news",
+                "title": subscription_name,
+                "body": f"新增 {len(fresh_entries)} 条新闻：{first_title}",
+                "timestamp": now,
+                "news_id": None,
+                "news_ids": news_ids,
+                "merged": True,
+                "subscription_id": subscription_id,
+                "subscription_ids": all_subscription_ids or (
+                    [subscription_id] if subscription_id else []
+                ),
+                "source": first_item.get("source"),
+                "url": None,
+                "ack_required": True,
+            })
+            for news_id in news_ids:
+                _ack_pending_news_ids[news_id] = now
+        _drop_oldest_notifications_if_over_capacity()
+    return {"ack_required": True}
+
+
+def ack_notifications(notification_ids, news_ids):
+    """幂等地把已 ACK 的通知从队列中移除，返回应标记为已投递的 news_id 集合。
+
+    即便队列里已经找不到对应条目（例如重复 ACK，或 Python 进程重启后队列
+    为空），显式传入的 news_id 依然会被返回，交给调用方尝试标记历史存储，
+    以保证幂等——重复调用不会报错，也不会产生副作用。
+    """
+    notification_id_set = set(notification_ids)
+    resolved_news_ids = set(news_ids)
+    with notification_lock:
+        remaining = []
+        for entry in notification_queue:
+            entry_ids = set(entry.get("notification_ids") or [])
+            if entry.get("notification_id"):
+                entry_ids.add(entry["notification_id"])
+            entry_news_ids = set(_as_id_list(entry.get("news_ids")))
+            if entry.get("news_id"):
+                entry_news_ids.add(entry["news_id"])
+            matched = bool(entry_ids & notification_id_set) or (
+                bool(entry_news_ids & resolved_news_ids)
+            )
+            if matched:
+                resolved_news_ids.update(entry_news_ids)
+                continue
+            remaining.append(entry)
+        notification_queue[:] = remaining
+        for news_id in resolved_news_ids:
+            _ack_pending_news_ids.pop(news_id, None)
+    return resolved_news_ids
+
 
 def init_agent():
     global agent
@@ -198,6 +406,18 @@ def route(method, path):
     return decorator
 
 
+# 新闻写 API 的 CSRF 边界：仅对 POST /news/* 与 POST /notifications/ack 生效，
+# 不影响 /chat、/config/save、/sessions/*、/portfolio/* 等既有端点。
+_CSRF_PROTECTED_EXACT_PATHS = {"/notifications/ack"}
+_CSRF_PROTECTED_PREFIXES = ("/news/",)
+
+
+def _is_csrf_protected_path(path):
+    if path in _CSRF_PROTECTED_EXACT_PATHS:
+        return True
+    return any(path.startswith(prefix) for prefix in _CSRF_PROTECTED_PREFIXES)
+
+
 @route("GET", "/config")
 def handle_get_config(req):
     Config.load()
@@ -219,15 +439,41 @@ def handle_get_config(req):
         "data_source": Config.DATA_SOURCE or "akshare",
         "alert_poll_interval_minutes": Config.ALERT_POLL_INTERVAL_MINUTES,
         "alert_trading_hours_only": Config.ALERT_TRADING_HOURS_ONLY,
+        "news_poll_interval_minutes": Config.NEWS_POLL_INTERVAL_MINUTES,
     }
 
 
 @route("GET", "/notifications/poll")
 def handle_notifications_poll(req):
+    """轮询桌面通知。
+
+    需要 ACK 的新闻通知（ack_required=True）取出后仍保留在队列中，直到
+    桌面端显式调用 POST /notifications/ack 才移除，从而支持“展示后崩溃/
+    ACK 失败”场景下一轮的重试；旧版系统通知维持取出即清空的行为。
+    """
     with notification_lock:
-        notifications = notification_queue.copy()
-        notification_queue.clear()
-    return {"notifications": notifications}
+        ack_required = [n for n in notification_queue if n.get("ack_required")]
+        legacy = [n for n in notification_queue if not n.get("ack_required")]
+        notification_queue[:] = ack_required
+    return {"notifications": legacy + ack_required}
+
+
+@route("POST", "/notifications/ack")
+def handle_notifications_ack(req):
+    """桌面端展示通知后（或因本地去重跳过展示）调用，确认已送达。幂等。"""
+    notification_ids = _as_id_list(req.body.get("notification_ids"))
+    news_ids = _as_id_list(req.body.get("news_ids"))
+    resolved_news_ids = ack_notifications(notification_ids, news_ids)
+    changed = 0
+    if resolved_news_ids:
+        changed = _news_history_store().mark_notifications_dispatched(
+            list(resolved_news_ids)
+        )
+    return {
+        "success": True,
+        "acknowledged": sorted(resolved_news_ids),
+        "changed": changed,
+    }
 
 
 @route("GET", "/config/check")
@@ -242,19 +488,21 @@ def handle_config_check(req):
 @route("GET", "/scheduler/tasks")
 def handle_scheduler_tasks(req):
     scheduler = TaskScheduler()
-    return {"tasks": scheduler.list_tasks()}
+    return {"tasks": scheduler.list_tasks_enriched()}
 
 
 @route("POST", "/notification")
 def handle_notification(req):
     title = req.body.get('title', 'Fin-Agent 提醒')
     body = req.body.get('body', '')
+    notification = dict(req.body)
+    notification.update({
+        "title": title,
+        "body": body,
+        "timestamp": req.body.get("timestamp", time.time()),
+    })
     with notification_lock:
-        notification_queue.append({
-            "title": title,
-            "body": body,
-            "timestamp": time.time()
-        })
+        notification_queue.append(notification)
     debug_print(f"Desktop notification queued: {title} - {body}")
     return {"success": True}
 
@@ -288,7 +536,8 @@ def handle_config_save(req):
     Config.update_app_settings(
         data.get('data_source', 'akshare'),
         data.get('alert_poll_interval_minutes', 10),
-        data.get('alert_trading_hours_only', True)
+        data.get('alert_trading_hours_only', True),
+        data.get('news_poll_interval_minutes')
     )
 
     from fin_agent.datasources import reset_provider_cache
@@ -296,6 +545,214 @@ def handle_config_save(req):
 
     init_agent()
     return {"success": True, "path": Config.get_env_path()}
+
+
+def _query_bool(value, default=None):
+    if value is None:
+        return default
+    normalized = str(value).strip().casefold()
+    if normalized in ("1", "true", "yes", "on"):
+        return True
+    if normalized in ("0", "false", "no", "off"):
+        return False
+    raise ApiError(400, "布尔参数必须为 true 或 false")
+
+
+def _news_subscription_store():
+    return NewsSubscriptionStore()
+
+
+def _news_history_store():
+    return NotifiedNewsStore()
+
+
+@route("GET", "/news/subscriptions")
+def handle_news_subscriptions(req):
+    enabled = _query_bool(req.query.get("enabled"))
+    subscription_type = req.query.get("type") or None
+    if subscription_type and subscription_type not in SUBSCRIPTION_TYPES:
+        raise ApiError(400, f"不支持的订阅类型：{subscription_type}")
+    return {
+        "subscriptions": _news_subscription_store().list_subscriptions(
+            enabled=enabled,
+            subscription_type=subscription_type,
+        )
+    }
+
+
+@route("POST", "/news/subscriptions/create")
+def handle_news_subscription_create(req):
+    subscription_type = req.body.get("type")
+    if not subscription_type:
+        raise ApiError(400, "missing type")
+    try:
+        item = _news_subscription_store().create_subscription(
+            subscription_type=subscription_type,
+            name=req.body.get("name"),
+            keywords=req.body.get("keywords"),
+            exclude_keywords=req.body.get("exclude_keywords"),
+            sources=req.body.get("sources"),
+            enabled=req.body.get("enabled", True),
+            symbols=req.body.get("symbols"),
+        )
+    except ValueError as e:
+        raise ApiError(400, str(e))
+    return {"success": True, "subscription": item}
+
+
+@route("POST", "/news/subscriptions/update")
+def handle_news_subscription_update(req):
+    subscription_id = req.body.get("id")
+    if not subscription_id:
+        raise ApiError(400, "missing id")
+    changes = {
+        key: req.body[key]
+        for key in (
+            "name", "enabled", "keywords", "exclude_keywords", "sources", "symbols",
+        )
+        if key in req.body
+    }
+    try:
+        item = _news_subscription_store().update_subscription(
+            subscription_id, **changes
+        )
+    except ValueError as e:
+        raise ApiError(400, str(e))
+    if item is None:
+        raise ApiError(404, "subscription not found")
+    return {"success": True, "subscription": item}
+
+
+@route("POST", "/news/subscriptions/delete")
+def handle_news_subscription_delete(req):
+    subscription_id = req.body.get("id")
+    if not subscription_id:
+        raise ApiError(400, "missing id")
+    if not _news_subscription_store().delete_subscription(subscription_id):
+        raise ApiError(404, "subscription not found")
+    return {"success": True, "deleted": True}
+
+
+@route("POST", "/news/subscriptions/toggle")
+def handle_news_subscription_toggle(req):
+    subscription_id = req.body.get("id")
+    if not subscription_id or "enabled" not in req.body:
+        raise ApiError(400, "missing id or enabled")
+    item = _news_subscription_store().set_enabled(
+        subscription_id, bool(req.body["enabled"])
+    )
+    if item is None:
+        raise ApiError(404, "subscription not found")
+    return {"success": True, "subscription": item}
+
+
+@route("GET", "/news")
+def handle_news_list(req):
+    try:
+        page = max(int(req.query.get("page", 1)), 1)
+        page_size = min(max(int(req.query.get("page_size", 50)), 1), 200)
+    except ValueError:
+        raise ApiError(400, "page/page_size 必须为整数")
+    source = req.query.get("source") or None
+    subscription_type = req.query.get("type") or None
+    if source and source not in SUPPORTED_NEWS_SOURCES:
+        raise ApiError(400, f"不支持的新闻源：{source}")
+    if subscription_type and subscription_type not in SUBSCRIPTION_TYPES:
+        raise ApiError(400, f"不支持的订阅类型：{subscription_type}")
+    result = _news_history_store().list_news(
+        source=source,
+        unread_only=_query_bool(req.query.get("unread"), False),
+        subscription_id=req.query.get("subscription_id") or None,
+        subscription_type=subscription_type,
+        query=req.query.get("query") or None,
+        symbol=req.query.get("symbol") or None,
+        news_id=req.query.get("id") or None,
+        offset=(page - 1) * page_size,
+        limit=page_size,
+    )
+    return {
+        "items": result["items"],
+        "total": result["total"],
+        "page": page,
+        "page_size": page_size,
+        "has_more": page * page_size < result["total"],
+    }
+
+
+@route("GET", "/news/unread-count")
+def handle_news_unread_count(req):
+    return {"count": _news_history_store().unread_count()}
+
+
+@route("POST", "/news/mark-read")
+def handle_news_mark_read(req):
+    news_id = req.body.get("id")
+    if not news_id:
+        raise ApiError(400, "missing id")
+    found = _news_history_store().mark_read(
+        news_id, read=req.body.get("read", True)
+    )
+    if not found:
+        raise ApiError(404, "news not found")
+    return {"success": True}
+
+
+@route("POST", "/news/mark-read-batch")
+def handle_news_mark_read_batch(req):
+    news_ids = req.body.get("ids")
+    if not isinstance(news_ids, list) or not news_ids:
+        raise ApiError(400, "ids 必须为非空数组")
+    changed = _news_history_store().mark_read_many(
+        news_ids, read=req.body.get("read", True)
+    )
+    return {"success": True, "changed": changed}
+
+
+@route("POST", "/news/mark-all-read")
+def handle_news_mark_all_read(req):
+    return {
+        "success": True,
+        "changed": _news_history_store().mark_all_read(),
+    }
+
+
+@route("POST", "/news/clear")
+def handle_news_clear(req):
+    return {"success": True, "cleared": _news_history_store().clear()}
+
+
+@route("GET", "/news/monitor/status")
+def handle_news_monitor_status(req):
+    from fin_agent.news_store import NewsMonitorStateStore
+
+    Config.load()
+    monitor = get_news_monitor()
+    if monitor is None:
+        return {
+            "running": False,
+            "cycle_running": False,
+            "closed": True,
+            "poll_interval_minutes": Config.NEWS_POLL_INTERVAL_MINUTES,
+            "last_started_at": None,
+            "last_completed_at": None,
+            "last_error": None,
+            "source_health": NewsMonitorStateStore().get_source_health(),
+        }
+    return monitor.status()
+
+
+@route("POST", "/news/refresh")
+def handle_news_refresh(req):
+    monitor = get_news_monitor() or start_news_monitor(enqueue_notification)
+    try:
+        accepted = monitor.refresh()
+    except RuntimeError as e:
+        raise ApiError(409, str(e))
+    return {
+        "success": True,
+        "accepted": accepted,
+        "status": monitor.status(),
+    }
 
 
 @route("POST", "/scheduler/tasks/remove")
@@ -539,6 +996,14 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         try:
+            if method == 'POST' and _is_csrf_protected_path(parsed.path):
+                content_type = (self.headers.get('Content-Type') or '').split(';')[0].strip().lower()
+                if content_type != 'application/json':
+                    raise ApiError(415, "Content-Type must be application/json")
+                # Electron 主进程用 Node http 客户端直连本机 API，不会带 Origin；
+                # 带非空 Origin 的请求视为浏览器发起的跨域调用，一律拒绝。
+                if self.headers.get('Origin'):
+                    raise ApiError(403, "Cross-origin requests are not allowed")
             query = {k: v[0] for k, v in parse_qs(parsed.query).items()}
             body = {}
             if method == 'POST':
@@ -795,6 +1260,7 @@ def run(port=5678):
     
     # Init agent on start
     init_agent()
+    start_news_monitor(enqueue_notification)
     
     sys.stderr.write("[Server] Ready to accept connections\n")
     sys.stderr.flush()
@@ -850,6 +1316,7 @@ def run(port=5678):
     finally:
         sys.stderr.write("[Server] Closing server...\n")
         sys.stderr.flush()
+        stop_news_monitor()
         httpd.server_close()
 
 if __name__ == '__main__':

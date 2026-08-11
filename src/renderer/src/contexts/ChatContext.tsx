@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react'
-import { createWelcomeAgentMessage } from '../utils/welcomeAgentMessage'
+import { normalizeSessionMessages } from '../utils/welcomeAgentMessage'
 
 export type ChatBlock =
   | { type: 'text'; content: string }
@@ -85,13 +85,16 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [messagesBySession, setMessagesBySession] = useState<Record<string, Message[]>>({})
   const [openTabs, setOpenTabs] = useState<SessionMeta[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
+  const [ready, setReady] = useState(false)
   const messagesBySessionRef = useRef(messagesBySession)
   messagesBySessionRef.current = messagesBySession
 
   const messages =
-    activeSessionId && messagesBySession[activeSessionId]
-      ? messagesBySession[activeSessionId]
-      : [createWelcomeAgentMessage()]
+    !ready
+      ? []
+      : activeSessionId && messagesBySession[activeSessionId]
+        ? messagesBySession[activeSessionId]
+        : []
 
   const refreshTabs = useCallback(async () => {
     const ids = readOpenTabIds()
@@ -110,7 +113,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const updateSessionMessages = useCallback((sessionId: string, action: MessagesUpdater) => {
     setMessagesBySession((prev) => {
-      const current = prev[sessionId] ?? [createWelcomeAgentMessage()]
+      const current = prev[sessionId] ?? []
       return { ...prev, [sessionId]: resolveMessages(action, current) }
     })
   }, [])
@@ -133,10 +136,10 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // 内存中已有该会话（例如后台仍在流式生成）时，不要用磁盘旧快照覆盖
       if (messagesBySessionRef.current[id] === undefined) {
         const body = await window.api.getSession(id)
-        const ui = (body.ui_messages as Message[]) || []
+        const ui = normalizeSessionMessages((body.ui_messages as Message[]) || [])
         setMessagesBySession((prev) => {
           if (prev[id] !== undefined) return prev
-          return { ...prev, [id]: ui.length > 0 ? ui : [createWelcomeAgentMessage()] }
+          return { ...prev, [id]: ui }
         })
       }
 
@@ -192,20 +195,31 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return () => clearTimeout(timer)
   }, [messagesBySession])
 
-  // 启动：迁移旧数据 → 恢复上次打开的标签 → 没有则新建
+  // 启动：迁移旧数据 → 恢复上次打开的标签 → 没有则新建；完成后再渲染页面，避免欢迎页闪一下
   useEffect(() => {
     void (async () => {
-      await migrateLegacyHistory()
-      const ids = readOpenTabIds()
-      if (ids.length > 0) {
-        await openSession(ids[ids.length - 1])
-      } else {
-        const { sessions } = await window.api.listSessions(0, 1)
-        if (sessions.length > 0) {
-          await openSession(sessions[0].id)
+      try {
+        await migrateLegacyHistory()
+        const ids = readOpenTabIds()
+        if (ids.length > 0) {
+          await openSession(ids[ids.length - 1])
         } else {
-          await newSession()
+          const { sessions } = await window.api.listSessions(0, 1)
+          if (sessions.length > 0) {
+            await openSession(sessions[0].id)
+          } else {
+            await newSession()
+          }
         }
+      } catch (err) {
+        console.error('[ChatContext] Bootstrap failed:', err)
+        try {
+          await newSession()
+        } catch (createErr) {
+          console.error('[ChatContext] Fallback newSession failed:', createErr)
+        }
+      } finally {
+        setReady(true)
       }
     })()
     // 仅在挂载时执行一次
@@ -217,10 +231,14 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }
 
   const clearMessages = () => {
-    setMessages([createWelcomeAgentMessage()])
+    setMessages([])
     if (activeSessionId) {
       void window.api.saveSessionUi(activeSessionId, [])
     }
+  }
+
+  if (!ready) {
+    return <div className="h-screen w-screen bg-[var(--fa-bg,#0c0c0e)]" aria-busy="true" />
   }
 
   return (

@@ -3,8 +3,9 @@ import { flushSync } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Settings, ChevronDown, ChevronRight, Check, Loader2, Terminal, Bell } from 'lucide-react'
+import { Settings, ChevronDown, ChevronRight, Check, Loader2, Terminal, Bell, Briefcase, Newspaper, ArrowUp, Square, Brain, Sun, Moon, Sparkles } from 'lucide-react'
 import { useChat, ChatBlock, Message } from '../contexts/ChatContext'
+import { useTheme } from '../contexts/ThemeContext'
 import { KlinePanel } from './KlinePanel'
 import { BacktestEquityPanel } from './BacktestEquityPanel'
 import { ReminderTasksModal } from './ReminderTasksModal'
@@ -13,14 +14,15 @@ import HistoryDrawer from './HistoryDrawer'
 import { parseToolResultToKline } from '../utils/parseToolOhlc'
 import { parseRunBacktestEquity } from '../utils/parseToolBacktest'
 import { getQuickReplyOptions, stripFinAgentChoicesForDisplay } from '../utils/extractReplyQuickOptions'
-import {
-  prefersReducedMotion,
-  StreamRevealController,
-  type RevealKind
-} from '../utils/streamReveal'
+import { getDefaultQuickReplyOptions, normalizeSessionMessages } from '../utils/welcomeAgentMessage'
+import { parseMaLadder } from '../utils/parseMaLadder'
+import { MaLadderPanel } from './MaLadderPanel'
 
 // ToolExecutionBlock type helper
 type ToolExecutionBlock = Extract<ChatBlock, { type: 'tool_execution' }>
+
+/** 内部工具：仍执行，但不在对话中展示，避免打断用户阅读 */
+const HIDDEN_TOOL_NAMES = new Set(['get_current_time'])
 
 function sameCallIndex(
   a: number | undefined,
@@ -48,29 +50,29 @@ const ToolExecutionView: React.FC<{ block: ToolExecutionBlock }> = ({ block }) =
 
   return (
     <div
-      className={`border border-gray-700 rounded-lg bg-gray-900/40 overflow-hidden mb-2 ${
+      className={`mb-2 overflow-hidden rounded-xl border border-[var(--fa-border)] bg-[var(--fa-surface)] ${
         showChart ? 'max-w-[min(100%,min(96vw,1400px))]' : 'max-w-[min(100%,900px)]'
       }`}
     >
-      <div 
-        className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-gray-800/50 transition-colors"
+      <div
+        className="flex cursor-pointer items-center gap-2 px-3 py-2.5 transition-colors duration-200 hover:bg-[var(--fa-surface-hover)]"
         onClick={() => setIsOpen(!isOpen)}
       >
-        <div className="text-gray-400">
+        <div className="text-[var(--fa-muted)]">
           {block.status === 'running' ? (
             <Loader2 className="animate-spin" size={14} />
           ) : block.status === 'success' ? (
-            <Check className="text-green-500" size={14} />
+            <Check className="text-emerald-600" size={14} />
           ) : (
-            <Terminal size={14} className="text-red-500" />
+            <Terminal size={14} className="text-[var(--fa-danger)]" />
           )}
         </div>
-        <div className="flex-1 font-mono text-xs text-gray-300 truncate flex items-center gap-2">
-          <span className="font-semibold text-blue-400">执行 {block.name}</span>
-          <span className="text-gray-500 truncate opacity-50">{block.args.substring(0, 50)}</span>
+        <div className="flex flex-1 items-center gap-2 truncate font-mono text-xs text-[var(--fa-muted)]">
+          <span className="font-semibold text-[var(--fa-accent)]">执行 {block.name}</span>
+          <span className="truncate opacity-60">{block.args.substring(0, 50)}</span>
         </div>
-        <div className="text-gray-500">
-            {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        <div className="text-[var(--fa-faint)]">
+          {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         </div>
       </div>
 
@@ -81,26 +83,30 @@ const ToolExecutionView: React.FC<{ block: ToolExecutionBlock }> = ({ block }) =
       )}
 
       {isOpen && (
-        <div className="border-t border-gray-700/50 bg-black/20 p-3 space-y-3 text-xs font-mono">
-           <div>
-             <div className="text-gray-500 mb-1 uppercase text-[10px] tracking-wider font-semibold">输入</div>
-             <div className="text-gray-300 break-all whitespace-pre-wrap bg-gray-900/50 p-2 rounded border border-gray-800">
-                {block.args}
-             </div>
-           </div>
-           
-           {block.result && (
-             <div>
-               <div className="text-gray-500 mb-1 uppercase text-[10px] tracking-wider font-semibold">输出</div>
-               <div className="text-gray-300 break-all whitespace-pre-wrap bg-gray-900/50 p-2 rounded border border-gray-800 max-h-60 overflow-y-auto">
-                  {block.result}
-               </div>
-             </div>
-           )}
-           
-           {block.status === 'running' && (
-              <div className="text-gray-500 italic">运行中...</div>
-           )}
+        <div className="space-y-3 border-t border-[var(--fa-border-subtle)] bg-[var(--fa-bg)] p-3 font-mono text-xs">
+          <div>
+            <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--fa-faint)]">
+              输入
+            </div>
+            <div className="whitespace-pre-wrap break-all rounded-lg border border-[var(--fa-border)] bg-[var(--fa-code-bg)] p-2.5 text-[var(--fa-text)]">
+              {block.args}
+            </div>
+          </div>
+
+          {block.result && (
+            <div>
+              <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--fa-faint)]">
+                输出
+              </div>
+              <div className="max-h-60 overflow-y-auto whitespace-pre-wrap break-all rounded-lg border border-[var(--fa-border)] bg-[var(--fa-code-bg)] p-2.5 text-[var(--fa-muted)]">
+                {block.result}
+              </div>
+            </div>
+          )}
+
+          {block.status === 'running' && (
+            <div className="italic text-[var(--fa-faint)]">运行中...</div>
+          )}
         </div>
       )}
     </div>
@@ -109,30 +115,35 @@ const ToolExecutionView: React.FC<{ block: ToolExecutionBlock }> = ({ block }) =
 
 // Message interface is now imported from ChatContext
 
-// 表格组件配置，提取出来避免重复创建
+function flattenPreChildren(node: React.ReactNode): string {
+  if (node == null || typeof node === 'boolean') return ''
+  if (typeof node === 'string') return node
+  if (typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map(flattenPreChildren).join('')
+  if (React.isValidElement(node)) return flattenPreChildren(node.props.children)
+  return ''
+}
+
+// 表格组件配置：跟随 CSS 主题变量（昼夜模式一致）
 const markdownComponents = {
   /** not-prose：避免 typography 把 table 缩成比正文更小；字号与外层 prose-sm 段落对齐 */
   table: ({ children, ...props }: any) => (
-    <div className="not-prose my-4 w-full overflow-x-auto rounded-lg border border-gray-700/60 bg-gray-950/40 text-sm leading-7">
+    <div className="not-prose my-4 w-full overflow-x-auto rounded-xl border border-[var(--fa-border)] bg-[var(--fa-surface)] text-sm leading-7 shadow-sm">
       <table {...props} className="w-full min-w-[640px] border-collapse">
         {children}
       </table>
     </div>
   ),
   thead: ({ children, ...props }: any) => (
-    <thead {...props} className="bg-gray-800/50">
+    <thead {...props} className="bg-[var(--fa-surface-hover)]">
       {children}
     </thead>
   ),
-  tbody: ({ children, ...props }: any) => (
-    <tbody {...props}>
-      {children}
-    </tbody>
-  ),
+  tbody: ({ children, ...props }: any) => <tbody {...props}>{children}</tbody>,
   th: ({ children, ...props }: any) => (
     <th
       {...props}
-      className="border border-gray-700 px-4 py-2 text-left text-sm font-semibold leading-7 text-gray-200 whitespace-nowrap"
+      className="border-b border-[var(--fa-border)] px-4 py-2.5 text-left text-sm font-semibold leading-7 text-[var(--fa-text)] whitespace-nowrap"
     >
       {children}
     </th>
@@ -140,22 +151,37 @@ const markdownComponents = {
   td: ({ children, ...props }: any) => (
     <td
       {...props}
-      className="border border-gray-700 px-4 py-2 text-sm font-normal leading-7 text-gray-300 whitespace-nowrap"
+      className="border-b border-[var(--fa-border-subtle)] px-4 py-2.5 text-sm font-normal leading-7 text-[var(--fa-muted)] whitespace-nowrap"
     >
       {children}
     </td>
   ),
   tr: ({ children, ...props }: any) => (
-    <tr {...props} className="hover:bg-gray-800/30 transition-colors even:bg-gray-900/30">
+    <tr
+      {...props}
+      className="transition-colors duration-150 even:bg-[var(--fa-stripe)] hover:bg-[var(--fa-surface-hover)]"
+    >
       {children}
     </tr>
   ),
+  pre: ({ children, ...props }: any) => {
+    const text = flattenPreChildren(children)
+    const ladder = parseMaLadder(text)
+    if (ladder) {
+      return <MaLadderPanel data={ladder} />
+    }
+    return (
+      <pre {...props} className="not-prose">
+        {children}
+      </pre>
+    )
+  }
 }
 
 const ChatView: React.FC = () => {
   const navigate = useNavigate()
   const { messages, setMessages, updateSessionMessages, activeSessionId } = useChat() // 使用 Context 中的消息历史
-  const { openTabs } = useChat()
+  const { theme, setTheme } = useTheme()
   const [input, setInput] = useState('')
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [isTyping, setIsTyping] = useState(false)
@@ -163,14 +189,12 @@ const ChatView: React.FC = () => {
   const [version, setVersion] = useState('...')
   const [autoScroll, setAutoScroll] = useState(true)
   const [reminderModalOpen, setReminderModalOpen] = useState(false)
+  const [newsUnreadCount, setNewsUnreadCount] = useState(0)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const activeSessionIdRef = useRef(activeSessionId)
   activeSessionIdRef.current = activeSessionId
-  const revealRef = useRef<StreamRevealController | null>(null)
-  const previousOpenTabIdsRef = useRef<Set<string>>(new Set())
-  const [revealingKeys, setRevealingKeys] = useState<Set<string>>(() => new Set())
 
   const applyToSession = (
     sessionId: string | undefined,
@@ -186,91 +210,6 @@ const ChatView: React.FC = () => {
   }
   const applyToSessionRef = useRef(applyToSession)
   applyToSessionRef.current = applyToSession
-
-  const appendRevealed = (sessionKey: string, kind: RevealKind, chunk: string) => {
-    const sessionId = sessionKey === '__default__' ? undefined : sessionKey
-    applyToSessionRef.current(sessionId, (prev) => {
-      const newMessages = [...prev]
-      if (!newMessages.length || newMessages[newMessages.length - 1].role !== 'assistant') {
-        newMessages.push({ role: 'assistant', content: '', logs: '', blocks: [] })
-      }
-
-      const ai = newMessages.length - 1
-      const src = newMessages[ai]
-      newMessages[ai] = {
-        ...src,
-        blocks: (src.blocks || []).map((block) => ({ ...block }))
-      }
-      const assistantMsg = newMessages[ai]
-      if (!assistantMsg.blocks) assistantMsg.blocks = []
-
-      const last = assistantMsg.blocks[assistantMsg.blocks.length - 1]
-      if (kind === 'text') {
-        assistantMsg.content = (assistantMsg.content || '') + chunk
-        if (last?.type === 'text') {
-          assistantMsg.blocks[assistantMsg.blocks.length - 1] = {
-            ...last,
-            content: last.content + chunk
-          }
-        } else {
-          assistantMsg.blocks.push({ type: 'text', content: chunk })
-        }
-      } else if (last?.type === 'thinking') {
-        assistantMsg.blocks[assistantMsg.blocks.length - 1] = {
-          ...last,
-          content: last.content + chunk
-        }
-      } else {
-        assistantMsg.blocks.push({ type: 'thinking', content: chunk })
-      }
-
-      return newMessages
-    })
-  }
-  const appendRevealedRef = useRef(appendRevealed)
-  appendRevealedRef.current = appendRevealed
-
-  useEffect(() => {
-    const ctrl = new StreamRevealController({
-      onReveal: (sessionKey, kind, chunk) => {
-        appendRevealedRef.current(sessionKey, kind, chunk)
-        if (!prefersReducedMotion()) {
-          setRevealingKeys((prev) => {
-            const next = new Set(prev)
-            next.add(sessionKey)
-            return next
-          })
-        }
-      },
-      onSettled: (sessionKey) => {
-        setRevealingKeys((prev) => {
-          const next = new Set(prev)
-          next.delete(sessionKey)
-          return next
-        })
-      }
-    })
-    revealRef.current = ctrl
-    return () => {
-      ctrl.disposeAll()
-      revealRef.current = null
-    }
-  }, [])
-  useEffect(() => {
-    const currentOpenTabIds = new Set(openTabs.map((tab) => tab.id))
-    const closedTabIds = [...previousOpenTabIdsRef.current].filter(
-      (id) => !currentOpenTabIds.has(id)
-    )
-    closedTabIds.forEach((id) => revealRef.current?.dispose(id))
-    if (closedTabIds.length > 0) {
-      setRevealingKeys((prev) => {
-        const next = new Set(prev)
-        closedTabIds.forEach((id) => next.delete(id))
-        return next
-      })
-    }
-    previousOpenTabIdsRef.current = currentOpenTabIds
-  }, [openTabs])
 
   const respondingKey = (sessionId?: string | null) => sessionId || activeSessionIdRef.current || '__default__'
   const isResponding = respondingSessions.has(respondingKey(activeSessionId))
@@ -306,10 +245,15 @@ const ChatView: React.FC = () => {
   }
 
   /** 根据最后一条助手消息末尾的编号/列表，启发式生成可点击选项 */
-  const quickReplyOptions = useMemo(
-    () => getQuickReplyOptions(messages, isResponding, isTyping),
-    [messages, isResponding, isTyping]
-  )
+  const displayMessages = useMemo(() => normalizeSessionMessages(messages), [messages])
+
+  const showWelcomeHero = displayMessages.length === 0
+
+  const quickReplyOptions = useMemo(() => {
+    if (isResponding || isTyping) return []
+    if (showWelcomeHero) return getDefaultQuickReplyOptions()
+    return getQuickReplyOptions(messages, isResponding, isTyping)
+  }, [messages, isResponding, isTyping, showWelcomeHero])
 
   useEffect(() => {
     scrollToBottom()
@@ -323,6 +267,29 @@ const ChatView: React.FC = () => {
   // Load version on mount
   useEffect(() => {
     window.api.getVersion().then(v => setVersion(v))
+  }, [])
+
+  // 新闻未读徽标：打开时加载一次，随后轻量轮询 + 监听通知事件，卸载时清理避免泄漏
+  useEffect(() => {
+    let cancelled = false
+    const loadNewsUnread = async () => {
+      try {
+        const res = await window.api.getNewsUnreadCount()
+        if (!cancelled) setNewsUnreadCount(res.count || 0)
+      } catch {
+        // 静默失败，保留上一次数值
+      }
+    }
+    void loadNewsUnread()
+    const intervalId = window.setInterval(loadNewsUnread, 45000)
+    const removeNewsListener = window.api.onNewsNotificationOpen(() => {
+      void loadNewsUnread()
+    })
+    return () => {
+      cancelled = true
+      window.clearInterval(intervalId)
+      removeNewsListener()
+    }
   }, [])
 
   useEffect(() => {
@@ -380,23 +347,6 @@ const ChatView: React.FC = () => {
 
         if (data.type === 'error' || data.type === 'finish') {
           markResponding(eventSessionId, false)
-          const key = eventSessionId || activeSessionIdRef.current || '__default__'
-          revealRef.current?.markEnded(key)
-        }
-
-        if (data.type === 'content' || data.type === 'thinking') {
-          applyToSession(eventSessionId, (prev) => {
-            const last = prev[prev.length - 1]
-            if (last?.role === 'assistant') return prev
-            return [...prev, { role: 'assistant', content: '', logs: '', blocks: [] }]
-          })
-          const key = eventSessionId || activeSessionIdRef.current || '__default__'
-          revealRef.current?.enqueue(
-            key,
-            data.type === 'content' ? 'text' : 'thinking',
-            data.content || ''
-          )
-          return
         }
 
         const patchFromStream = (prev: Message[]) => {
@@ -418,6 +368,12 @@ const ChatView: React.FC = () => {
             }
             const assistantMsg = newMessages[ai]
             if (!assistantMsg.blocks) assistantMsg.blocks = []
+
+            const getLastBlock = (type: 'text' | 'thinking') => {
+                const lastBlock = assistantMsg.blocks[assistantMsg.blocks.length - 1]
+                if (lastBlock && lastBlock.type === type) return lastBlock
+                return null
+            }
             
             // Helper specifically for tool execution
             const getLastToolExecution = () => {
@@ -428,20 +384,32 @@ const ChatView: React.FC = () => {
                 return null
             }
 
-            if (data.type === 'answer') {
+            if (data.type === 'content') {
+                assistantMsg.content += data.content || ''
+                const lastBlock = getLastBlock('text')
+                if (lastBlock && lastBlock.type === 'text') {
+                    lastBlock.content += data.content || ''
+                } else {
+                    assistantMsg.blocks.push({ type: 'text', content: data.content || '' })
+                }
+            } else if (data.type === 'thinking') {
+                const lastBlock = getLastBlock('thinking')
+                if (lastBlock && lastBlock.type === 'thinking') {
+                    lastBlock.content += data.content || ''
+                } else {
+                    assistantMsg.blocks.push({ type: 'thinking', content: data.content || '' })
+                }
+            } else if (data.type === 'answer') {
                 // Some providers only return a final answer event.
-                const key = eventSessionId || activeSessionIdRef.current || '__default__'
-                const ctrl = revealRef.current
                 const hasText =
                     Boolean(assistantMsg.content?.trim()) ||
                     assistantMsg.blocks.some(
                         (block) => block.type === 'text' && Boolean(block.content)
                     )
-                // Providers may send both content chunks and a final answer; an active reveal already owns that text.
-                if (!hasText && !ctrl?.isRevealing(key) && data.content) {
-                    ctrl?.enqueue(key, 'text', data.content)
+                if (!hasText && data.content) {
+                    assistantMsg.content = data.content
+                    assistantMsg.blocks.push({ type: 'text', content: data.content })
                 }
-                ctrl?.markEnded(key)
             } else if (data.type === 'log') {
                 assistantMsg.logs = (assistantMsg.logs || '') + `[Log] ${data.content}\n`
             } else if (data.type === 'tool_call') {
@@ -746,8 +714,6 @@ const ChatView: React.FC = () => {
 
     if (isResponding) {
       console.log('[ChatView] Stopping generation...')
-      const key = activeSessionId || '__default__'
-      revealRef.current?.flush(key)
       window.api.stopGeneration(activeSessionId ?? undefined)
       markResponding(activeSessionId ?? undefined, false)
       setIsTyping(false)
@@ -774,184 +740,272 @@ const ChatView: React.FC = () => {
 
 
   return (
-    <div className="relative flex flex-col h-screen bg-gray-900 text-white drag-region">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800 bg-gray-900/50 backdrop-blur no-drag">
-        <div className="font-semibold text-lg">Fin-Agent</div>
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => setReminderModalOpen(true)}
-            className="text-gray-400 hover:text-white transition-colors p-1 rounded hover:bg-gray-800"
-            title="提醒任务"
-          >
-            <Bell size={18} />
-          </button>
-          <button
-            onClick={() => navigate('/portfolio')}
-            className="text-gray-400 hover:text-white transition-colors p-1 rounded hover:bg-gray-800"
-            title="投资组合"
-          >
-            投资组合
-          </button>
-          <button
-            onClick={() => navigate('/config')}
-            className="text-gray-400 hover:text-white transition-colors p-1 rounded hover:bg-gray-800"
-            title="设置"
-          >
-            <Settings size={18} />
-          </button>
-          <button
-            onClick={() => navigate('/about')}
-            className="text-xs text-gray-500 hover:text-blue-400 transition-colors cursor-pointer"
-            title="关于 / 支持"
-          >v{version}</button>
-        </div>
-      </div>
-
-      <ReminderTasksModal open={reminderModalOpen} onClose={() => setReminderModalOpen(false)} />
-
+    <div className="relative flex h-screen bg-[var(--fa-sidebar)] text-[var(--fa-text)]">
       <SessionTabs onOpenDrawer={() => setDrawerOpen(true)} />
 
-      {/* Messages */}
-      <div 
-        ref={scrollContainerRef}
-        onScroll={handleScroll}
-        className="flex-1 overflow-y-auto px-4 py-4 md:px-8 space-y-6 no-drag"
-      >
-        {messages.map((msg, idx) => (
-          <div key={idx} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start w-full'}`}>
-            <div className={`${
-              msg.role === 'user' 
-                ? 'bg-blue-600 text-white rounded-2xl px-4 py-3 max-w-[min(90%,42rem)]' 
-                : 'text-gray-100 py-2 w-full min-w-0 max-w-full'
-            }`}>
-              {msg.role === 'user' ? (
-                msg.content
-              ) : (
-                <div className="w-full space-y-4">
-                  {(msg.blocks || []).map((block, bIdx) => {
-                    if (block.type === 'thinking') {
-                      return (
-                        <div key={bIdx} className="text-xs text-gray-400 bg-gray-900/50 p-3 rounded-lg border border-gray-700/50">
-                          <div className="font-bold mb-1 opacity-70 flex items-center gap-2">
-                            <span>💭 思考过程</span>
-                          </div>
-                          <div className="whitespace-pre-wrap break-words opacity-90 leading-relaxed font-mono">
-                            {block.content}
-                          </div>
-                        </div>
-                      )
-                    }
-                    if (block.type === 'tool_execution') {
-                        return <ToolExecutionView key={bIdx} block={block} />
-                    }
-                    if (block.type === 'text') {
-                      const md = stripFinAgentChoicesForDisplay(block.content)
-                      const lastTextBlockIndex =
-                        msg.blocks?.reduce(
-                          (lastIndex, candidate, candidateIndex) =>
-                            candidate.type === 'text' ? candidateIndex : lastIndex,
-                          -1
-                        ) ?? -1
-                      const showCaret =
-                        idx === messages.length - 1 &&
-                        bIdx === lastTextBlockIndex &&
-                        revealingKeys.has(activeSessionId || '__default__')
-                      return (
-                        <React.Fragment key={bIdx}>
-                          <div className="prose prose-invert prose-sm max-w-none">
-                            <ReactMarkdown
-                              remarkPlugins={[remarkGfm]}
-                              components={markdownComponents}
+      <div className="fa-shell-main">
+        <header className="fa-shell-toolbar fa-titlebar-row fa-titlebar-row--reserve-end">
+          <div className="flex items-center gap-0.5">
+            <div className="fa-theme-toggle" role="group" aria-label="主题切换">
+              <button
+                type="button"
+                onClick={() => setTheme('light')}
+                data-active={theme === 'light'}
+                className="fa-theme-toggle-btn focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--fa-accent)]"
+                title="白天模式"
+                aria-label="白天模式"
+                aria-pressed={theme === 'light'}
+              >
+                <Sun size={15} strokeWidth={theme === 'light' ? 2.25 : 2} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setTheme('dark')}
+                data-active={theme === 'dark'}
+                className="fa-theme-toggle-btn focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--fa-accent)]"
+                title="夜晚模式"
+                aria-label="夜晚模式"
+                aria-pressed={theme === 'dark'}
+              >
+                <Moon size={15} strokeWidth={theme === 'dark' ? 2.25 : 2} />
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => setReminderModalOpen(true)}
+              className="fa-icon-btn focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--fa-accent)]"
+              title="提醒任务"
+              aria-label="提醒任务"
+            >
+              <Bell size={18} />
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/news')}
+              className="fa-icon-btn relative focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--fa-accent)]"
+              title="新闻中心"
+              aria-label="新闻中心"
+            >
+              <Newspaper size={18} />
+              {newsUnreadCount > 0 && (
+                <span className="fa-news-badge absolute right-0.5 top-0.5" aria-hidden>
+                  {newsUnreadCount > 99 ? '99+' : newsUnreadCount}
+                </span>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/portfolio')}
+              className="fa-icon-btn focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--fa-accent)]"
+              title="投资组合"
+              aria-label="投资组合"
+            >
+              <Briefcase size={18} />
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/config')}
+              className="fa-icon-btn focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--fa-accent)]"
+              title="设置"
+              aria-label="设置"
+            >
+              <Settings size={18} />
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/about')}
+              className="fa-icon-btn px-2.5 text-xs font-medium tabular-nums"
+              title="关于 / 支持"
+            >
+              v{version}
+            </button>
+          </div>
+        </header>
+
+        <div className="fa-main-panel">
+        <ReminderTasksModal open={reminderModalOpen} onClose={() => setReminderModalOpen(false)} />
+
+        {/* 空状态 hero 或消息流 */}
+        {showWelcomeHero ? (
+          <div className="fa-hero no-drag">
+            <div className="fa-hero-icon" aria-hidden>
+              <Sparkles size={28} strokeWidth={1.5} />
+            </div>
+            <h1 className="fa-hero-title">今天想分析什么？</h1>
+            <p className="fa-hero-sub">
+              行情、财务、选股、回测与持仓提醒 — 直接输入，或点下方快捷语句开始
+            </p>
+          </div>
+        ) : (
+          <div
+            ref={scrollContainerRef}
+            onScroll={handleScroll}
+            className="flex-1 overflow-y-auto px-4 py-8 md:px-8 no-drag"
+          >
+            <div className="mx-auto w-full max-w-3xl space-y-8">
+              {displayMessages.map((msg, idx) => (
+              <div
+                key={idx}
+                className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start w-full'}`}
+              >
+                <div
+                  className={
+                    msg.role === 'user'
+                      ? 'max-w-[min(90%,32rem)] rounded-2xl bg-[var(--fa-user-bubble)] px-4 py-2.5 text-[15px] leading-relaxed text-[var(--fa-text)]'
+                      : 'w-full min-w-0 max-w-full py-0.5 text-[15px] leading-relaxed text-[var(--fa-text)]'
+                  }
+                >
+                  {msg.role === 'user' ? (
+                    msg.content
+                  ) : (
+                    <div className="w-full space-y-4">
+                      {(msg.blocks || []).map((block, bIdx) => {
+                        if (block.type === 'thinking') {
+                          return (
+                            <div
+                              key={bIdx}
+                              className="rounded-xl border border-[var(--fa-border-subtle)] bg-[var(--fa-surface)] p-3 text-xs text-[var(--fa-muted)]"
                             >
-                              {md}
-                            </ReactMarkdown>
-                          </div>
-                          {showCaret && <span className="fa-stream-caret" aria-hidden />}
-                        </React.Fragment>
-                      )
-                    }
-                    return null
-                  })}
-                  
-                  {/* Fallback for messages without blocks (legacy) */}
-                  {(!msg.blocks || msg.blocks.length === 0) && msg.content && (
-                     <div className="prose prose-invert prose-sm max-w-none">
-                        <ReactMarkdown 
-                          remarkPlugins={[remarkGfm]}
-                          components={markdownComponents}
-                        >
-                          {stripFinAgentChoicesForDisplay(msg.content)}
-                        </ReactMarkdown>
-                     </div>
+                              <div className="mb-1.5 flex items-center gap-1.5 font-medium opacity-80">
+                                <Brain size={14} aria-hidden />
+                                <span>思考过程</span>
+                              </div>
+                              <div className="whitespace-pre-wrap break-words font-mono leading-relaxed opacity-90">
+                                {block.content}
+                              </div>
+                            </div>
+                          )
+                        }
+                        if (block.type === 'tool_execution') {
+                          if (HIDDEN_TOOL_NAMES.has(block.name)) return null
+                          return <ToolExecutionView key={bIdx} block={block} />
+                        }
+                        if (block.type === 'text') {
+                          const md = stripFinAgentChoicesForDisplay(block.content)
+                          const lastTextBlockIndex =
+                            msg.blocks?.reduce(
+                              (lastIndex, candidate, candidateIndex) =>
+                                candidate.type === 'text' ? candidateIndex : lastIndex,
+                              -1
+                            ) ?? -1
+                          const isLiveTail =
+                            isResponding &&
+                            idx === messages.length - 1 &&
+                            bIdx === lastTextBlockIndex
+                          return (
+                            <div
+                              key={bIdx}
+                              className={`prose prose-fa prose-sm max-w-none${
+                                isLiveTail ? ' fa-stream-live' : ''
+                              }`}
+                            >
+                              <ReactMarkdown
+                                remarkPlugins={[remarkGfm]}
+                                components={markdownComponents}
+                              >
+                                {md}
+                              </ReactMarkdown>
+                            </div>
+                          )
+                        }
+                        return null
+                      })}
+
+                      {(!msg.blocks || msg.blocks.length === 0) && msg.content && (
+                        <div className="prose prose-fa prose-sm max-w-none">
+                          <ReactMarkdown
+                            remarkPlugins={[remarkGfm]}
+                            components={markdownComponents}
+                          >
+                            {stripFinAgentChoicesForDisplay(msg.content)}
+                          </ReactMarkdown>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
-              )}
-            </div>
-            
-            {/* Logs Display (Removed legacy logs block) */}
+              </div>
+            ))}
+            {isTyping && (
+              <div className="flex w-full min-w-0 justify-start">
+                <div className="flex items-center gap-1 py-2 text-[var(--fa-faint)]">
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[var(--fa-faint)]" />
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[var(--fa-faint)] [animation-delay:100ms]" />
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[var(--fa-faint)] [animation-delay:200ms]" />
+                </div>
+              </div>
+            )}
+            <div ref={messagesEndRef} />
           </div>
-        ))}
-        {isTyping && (
-           <div className="flex w-full min-w-0 justify-start">
-            <div className="text-gray-500 py-2 flex gap-1 items-center">
-              <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce"></span>
-              <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce delay-100"></span>
-              <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce delay-200"></span>
-            </div>
-          </div>
+        </div>
         )}
-        <div ref={messagesEndRef} />
-      </div>
 
-      {/* Input Area */}
-      <div className="border-t border-gray-800 bg-gray-900/50 backdrop-blur px-4 py-4 md:px-8 no-drag">
-        {quickReplyOptions.length > 0 && (
-          <div className="mb-3 flex flex-col gap-2">
-            <div className="text-[11px] text-slate-500">可选回复（助手附带或自动识别；不足时补充通用追问）</div>
-            <div className="flex flex-wrap gap-2">
-              {quickReplyOptions.map((opt) => (
+        {/* 悬浮输入岛 */}
+        <div className="fa-composer-wrap no-drag">
+          <div className="mx-auto w-full max-w-2xl">
+            {quickReplyOptions.length > 0 && (
+              <div className="mb-3 flex flex-wrap justify-center gap-2">
+                {quickReplyOptions.map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    disabled={isResponding || isTyping}
+                    onClick={() => void sendUserText(opt.sendText)}
+                    className="fa-quick-chip"
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            )}
+            <form onSubmit={handleSubmit} className="fa-composer">
+              <input
+                ref={inputRef}
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder={isResponding ? 'Fin-Agent 正在回复…' : '随心输入'}
+                autoFocus
+                className="w-full bg-transparent px-5 pt-4 pb-2 text-[15px] text-[var(--fa-text)] outline-none placeholder:text-[var(--fa-faint)]"
+                aria-label="消息输入"
+              />
+              <div className="flex items-center justify-between gap-3 px-4 pb-4">
+                <span className="truncate text-xs text-[var(--fa-faint)]">本地金融助手</span>
                 <button
-                  key={opt.id}
-                  type="button"
-                  disabled={isResponding || isTyping}
-                  onClick={() => void sendUserText(opt.sendText)}
-                  className="max-w-full break-words rounded-xl border border-slate-600 bg-slate-800/90 px-3 py-2 text-left text-sm text-slate-100 transition-colors hover:border-blue-500/50 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+                  type="submit"
+                  disabled={(!input.trim() && !isResponding) || isTyping}
+                  onClick={() =>
+                    console.log(
+                      '[ChatView] Send/Stop button clicked, isTyping:',
+                      isTyping,
+                      'isResponding:',
+                      isResponding,
+                      'input:',
+                      input
+                    )
+                  }
+                  className={[
+                    'fa-send-btn',
+                    isResponding ? 'fa-send-btn-stop hover:brightness-110' : ''
+                  ].join(' ')}
+                  title={isResponding ? '停止' : '发送'}
+                  aria-label={isResponding ? '停止生成' : '发送消息'}
                 >
-                  {opt.label}
+                  {isResponding ? (
+                    <Square size={14} fill="currentColor" />
+                  ) : (
+                    <ArrowUp size={18} strokeWidth={2.5} />
+                  )}
                 </button>
-              ))}
-            </div>
+              </div>
+            </form>
           </div>
-        )}
-        <form onSubmit={handleSubmit} className="flex gap-2">
-          <input
-            ref={inputRef}
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={isResponding ? "Fin-Agent 正在回复..." : "输入消息..."}
-            autoFocus
-            className="flex-1 bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-          />
-          <button 
-            type="submit"
-            disabled={(!input.trim() && !isResponding) || isTyping}
-            onClick={() => console.log('[ChatView] Send/Stop button clicked, isTyping:', isTyping, 'isResponding:', isResponding, 'input:', input)}
-            className={`${
-              isResponding 
-                ? 'bg-red-600 hover:bg-red-700' 
-                : 'bg-blue-600 hover:bg-blue-700'
-            } disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl px-6 py-2 transition-colors font-medium`}
-          >
-            {isResponding ? '停止' : '发送'}
-          </button>
-        </form>
-      </div>
+        </div>
+        </div>
 
-      <HistoryDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
+        <HistoryDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
+      </div>
     </div>
   )
 }

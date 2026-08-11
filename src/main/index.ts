@@ -1,8 +1,8 @@
-import { app, BrowserWindow, globalShortcut, ipcMain, Tray, Menu, nativeImage, Notification, shell } from 'electron'
+import { app, BrowserWindow, globalShortcut, ipcMain, Tray, Menu, nativeImage, Notification, shell, screen } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { spawn, ChildProcess, exec, execSync } from 'child_process'
-import { readFileSync, existsSync, appendFileSync, createWriteStream, unlink } from 'fs'
+import { readFileSync, existsSync, appendFileSync, createWriteStream, unlink, writeFileSync, renameSync, mkdirSync } from 'fs'
 import * as http from 'http'
 import * as https from 'https'
 import { promisify, format } from 'util'
@@ -55,6 +55,156 @@ let hasConversationContext = false  // 跟踪是否有对话上下文
 let isCleaningUp = false  // 防止重复执行清理
 const activeRequests = new Map<string, http.ClientRequest>()  // sessionKey -> 进行中的 HTTP 请求
 const userStoppedKeys = new Set<string>()  // 用户主动停止的请求 key
+// 通知状态机（每条通知以其 notification_ids 为 key）：
+//   unknown -> inFlight（已 show()，等待 show/failed 事件）
+//     -> show 触发：写 seen + 同步落盘成功 -> ack；落盘失败 -> 仅记日志，
+//        不 ack，留给下一轮 poll 重试落盘/ACK
+//     -> failed（或构造/show 抛错）：清 inFlight，不写 seen、不 ack，
+//        下一轮 poll 视为全新通知重新尝试展示
+//   seen（内存或持久化命中）-> 不再重复弹窗，仅重试 ACK（幂等）
+// 之所以只在 show 事件之后才落 seen/ACK：show() 是异步展示，调用后立即
+// ack 无法保证系统真的把通知弹出来了；只有 show 事件才是“已确认展示”。
+const inFlightNotificationIds = new Set<string>()
+// 持有正在等待事件的 Notification 引用，防止提前被 GC 回收导致
+// show/failed 事件永远不触发（Electron 已知坑，事件由原生层异步派发）。
+const retainedNotifications = new Set<Notification>()
+const seenNotificationIds = new Map<string, number>()
+const NOTIFICATION_SEEN_TTL_MS = 30 * 24 * 60 * 60 * 1000 // 与 pending 生命周期一致，至少 30 天
+const NOTIFICATION_SEEN_MAX_SIZE = 5000
+let seenNotificationsFilePath = ''
+let seenNotificationsDirty = false
+let seenNotificationsSaveTimer: ReturnType<typeof setTimeout> | null = null
+
+type DesktopNotificationPayload = {
+  notification_id?: string
+  notification_ids?: string[]
+  type?: string
+  title?: string
+  body?: string
+  news_id?: string | null
+  news_ids?: string[]
+  merged?: boolean
+  subscription_id?: string | null
+  subscription_ids?: string[]
+  source?: string
+  url?: string
+  ack_required?: boolean
+}
+
+function loadSeenNotifications(): void {
+  try {
+    seenNotificationsFilePath = join(app.getPath('userData'), 'seen-notifications.json')
+    if (!existsSync(seenNotificationsFilePath)) return
+    const raw = readFileSync(seenNotificationsFilePath, 'utf-8')
+    const parsed = JSON.parse(raw)
+    const entries = parsed && typeof parsed === 'object' ? parsed.entries : null
+    if (entries && typeof entries === 'object') {
+      const now = Date.now()
+      for (const [id, seenAt] of Object.entries(entries as Record<string, number>)) {
+        if (typeof seenAt === 'number' && now - seenAt <= NOTIFICATION_SEEN_TTL_MS) {
+          seenNotificationIds.set(id, seenAt)
+        }
+      }
+    }
+  } catch (err) {
+    // 读写失败只记日志，不影响通知主流程；后端 ACK 仍是主保证
+    console.error('[Notification] Failed to load seen-notifications cache:', err)
+  }
+}
+
+/** 同步原子落盘。展示确认（show 事件）后的 ACK 关键路径必须调用这个函数
+ * 并等待其返回结果，不能走防抖——防抖会在“确认已展示”和“确认已持久化”
+ * 之间引入不确定的时间窗口，一旦此时崩溃就会永久丢失该通知已展示的记录，
+ * 导致重启后既重复弹窗、又可能因为本地误判 seen 而漏掉重试 ACK。
+ * 返回 true 表示当前内存状态已安全落盘（或本来就没有脏数据）。 */
+function persistSeenNotificationsNow(): boolean {
+  if (!seenNotificationsDirty) return true
+  if (!seenNotificationsFilePath) return false
+  try {
+    mkdirSync(join(seenNotificationsFilePath, '..'), { recursive: true })
+    const payload = JSON.stringify({ entries: Object.fromEntries(seenNotificationIds) })
+    const tempPath = `${seenNotificationsFilePath}.${process.pid}.tmp`
+    writeFileSync(tempPath, payload, 'utf-8')
+    renameSync(tempPath, seenNotificationsFilePath)
+    seenNotificationsDirty = false
+    if (seenNotificationsSaveTimer) {
+      clearTimeout(seenNotificationsSaveTimer)
+      seenNotificationsSaveTimer = null
+    }
+    return true
+  } catch (err) {
+    console.error('[Notification] Failed to persist seen-notifications cache:', err)
+    return false
+  }
+}
+
+/** 仅用于非关键路径（后台过期清理）的防抖落盘，不参与 ACK 判定。 */
+function scheduleSeenNotificationsSave(): void {
+  if (seenNotificationsSaveTimer) return
+  seenNotificationsSaveTimer = setTimeout(() => {
+    seenNotificationsSaveTimer = null
+    persistSeenNotificationsNow()
+  }, 1500)
+}
+
+function pruneExpiredSeenNotifications(): void {
+  const now = Date.now()
+  let pruned = false
+  for (const [id, seenAt] of seenNotificationIds) {
+    if (now - seenAt > NOTIFICATION_SEEN_TTL_MS) {
+      seenNotificationIds.delete(id)
+      pruned = true
+    }
+  }
+  if (pruned) {
+    seenNotificationsDirty = true
+    scheduleSeenNotificationsSave()
+  }
+}
+
+function isNotificationSeen(ids: string[]): boolean {
+  if (ids.length === 0) return false
+  return ids.every((id) => seenNotificationIds.has(id))
+}
+
+/** 只应在收到 show 事件（真正确认已展示）之后调用。 */
+function markNotificationsSeen(ids: string[]): void {
+  if (ids.length === 0) return
+  const now = Date.now()
+  for (const id of ids) {
+    seenNotificationIds.set(id, now)
+  }
+  seenNotificationsDirty = true
+  while (seenNotificationIds.size > NOTIFICATION_SEEN_MAX_SIZE) {
+    const oldest = seenNotificationIds.keys().next().value
+    if (!oldest) break
+    seenNotificationIds.delete(oldest)
+  }
+}
+
+async function ackNotifications(ids: string[], newsIdsInput?: string | string[] | null): Promise<void> {
+  const notificationIds = [...new Set(ids.filter(Boolean))]
+  const newsIds = [
+    ...new Set(
+      (Array.isArray(newsIdsInput)
+        ? newsIdsInput
+        : newsIdsInput
+          ? [newsIdsInput]
+          : []
+      ).filter(Boolean)
+    )
+  ]
+  if (notificationIds.length === 0 && newsIds.length === 0) return
+  try {
+    await makeApiRequest('/notifications/ack', 'POST', {
+      notification_ids: notificationIds,
+      news_ids: newsIds
+    })
+  } catch (err) {
+    // 网络/后端瞬时失败：不做特殊处理，下一轮 poll 会重新收到该通知并重试 ACK
+    console.error('[Notification] ack failed, will retry on next poll:', err)
+  }
+}
 
 function streamRequestKey(sessionId?: string | null): string {
   return sessionId || '__default__'
@@ -315,13 +465,54 @@ function createInputWindow(): void {
   }
 }
 
+/** 与 renderer index.css --fa-titlebar-height 保持一致 */
+const TITLE_BAR_HEIGHT = 40
+
+/** 与 renderer index.css --fa-sidebar / --fa-muted 对齐 */
+const TITLE_BAR_THEME = {
+  dark: { color: '#0d0d0d', symbolColor: '#8e8e8e' },
+  light: { color: '#ffffff', symbolColor: '#52525b' }
+} as const
+
+function supportsTitleBarOverlay(): boolean {
+  return process.platform === 'win32' || process.platform === 'darwin'
+}
+
+function applyTitleBarTheme(win: BrowserWindow | null, theme: keyof typeof TITLE_BAR_THEME = 'dark'): void {
+  if (!win || win.isDestroyed() || !supportsTitleBarOverlay()) return
+  const palette = TITLE_BAR_THEME[theme]
+  win.setBackgroundColor(palette.color)
+  win.setTitleBarOverlay({
+    color: palette.color,
+    symbolColor: palette.symbolColor,
+    height: TITLE_BAR_HEIGHT
+  })
+}
+
 function createChatWindow(): void {
+  const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize
+  const width = Math.min(1360, Math.max(1100, Math.floor(sw * 0.78)))
+  const height = Math.min(900, Math.max(720, Math.floor(sh * 0.85)))
+
   chatWindow = new BrowserWindow({
-    width: 900,
-    height: 670,
+    width,
+    height,
+    minWidth: 1024,
+    minHeight: 680,
+    center: true,
     show: false,
     autoHideMenuBar: true,
     title: 'Fin-Agent',
+    backgroundColor: TITLE_BAR_THEME.dark.color,
+    ...(supportsTitleBarOverlay()
+      ? {
+          titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
+          titleBarOverlay: {
+            ...TITLE_BAR_THEME.dark,
+            height: TITLE_BAR_HEIGHT
+          }
+        }
+      : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false
@@ -776,6 +967,7 @@ app.whenReady().then(() => {
   })
 
   setupLogging()
+  loadSeenNotifications()
 
   startPythonServer()
   createInputWindow()
@@ -846,13 +1038,54 @@ app.whenReady().then(() => {
     try {
       const res = await makeApiRequest('/notifications/poll')
       if (res && res.notifications && Array.isArray(res.notifications)) {
-        res.notifications.forEach((notif: { title: string; body: string }) => {
-          const notification = new Notification({
-            title: notif.title || 'Fin-Agent 提醒',
-            body: notif.body || '',
-            silent: false
-          })
-          
+        res.notifications.forEach((notif: DesktopNotificationPayload) => {
+          const ids = [
+            ...new Set([
+              ...(notif.notification_ids || []),
+              ...(notif.notification_id ? [notif.notification_id] : [])
+            ].filter(Boolean))
+          ]
+
+          if (ids.length > 0 && ids.some((id) => inFlightNotificationIds.has(id))) {
+            // 上一轮已经在构造/等待展示确认：既不重复构造，也绝不能 ACK
+            // ——展示结果（show/failed）还没揭晓，交给对应事件处理器决定
+            return
+          }
+
+          if (isNotificationSeen(ids)) {
+            // 之前已经确认展示过（本次运行内 show 过，或持久化记录跨重启命中）：
+            // 不再弹窗。若上次展示后的同步落盘失败，必须先重试持久化；
+            // 只有持久化成功才 ACK，避免进程在 ACK 后崩溃导致跨重启丢失幂等记录。
+            const persisted = persistSeenNotificationsNow()
+            if (persisted && notif.ack_required) {
+              void ackNotifications(ids, notif.news_ids?.length ? notif.news_ids : notif.news_id)
+            }
+            return
+          }
+
+          if (ids.length > 0) {
+            ids.forEach((id) => inFlightNotificationIds.add(id))
+          }
+          const clearInFlight = () => {
+            ids.forEach((id) => inFlightNotificationIds.delete(id))
+          }
+
+          let notification: Notification
+          try {
+            notification = new Notification({
+              title: notif.title || 'Fin-Agent 提醒',
+              body: notif.body || '',
+              silent: false
+            })
+          } catch (err) {
+            console.error('[Notification] Failed to construct notification:', err)
+            clearInFlight()
+            return
+          }
+          // 防止 show/failed 原生事件触发前对象被 GC，导致事件永远收不到
+          retainedNotifications.add(notification)
+          const release = () => retainedNotifications.delete(notification)
+
           notification.on('click', () => {
             // Show chat window when notification is clicked
             if (chatWindow) {
@@ -861,19 +1094,84 @@ app.whenReady().then(() => {
               }
               chatWindow.show()
               chatWindow.focus()
+              if (notif.type === 'news' || notif.news_id || notif.merged) {
+                // 合并通知不带单条 newsId，仅按 subscriptionId 打开新闻中心并套用筛选
+                const newsId = notif.merged ? undefined : notif.news_id || undefined
+                const location = {
+                  newsId,
+                  subscriptionId: notif.subscription_id || undefined,
+                  subscriptionIds: notif.subscription_ids || [],
+                  source: notif.source,
+                  url: notif.merged ? undefined : notif.url
+                }
+                const routeParams = new URLSearchParams()
+                if (newsId) routeParams.set('newsId', newsId)
+                if (notif.subscription_id) {
+                  routeParams.set('subscriptionId', notif.subscription_id)
+                }
+                const routeQuery = routeParams.toString()
+                chatWindow.webContents.send(
+                  'navigate-route',
+                  `/news${routeQuery ? `?${routeQuery}` : ''}`
+                )
+                chatWindow.webContents.send('news-notification-open', location)
+              }
             }
           })
-          
-          notification.show()
+
+          notification.on('show', () => {
+            clearInFlight()
+            if (ids.length === 0) {
+              release()
+              return
+            }
+            // 只有系统真正回调了 show，才代表通知已确认展示；先同步原子落盘，
+            // 落盘成功后才 ACK——避免“展示成功但记录/确认都没完成”时进程崩溃，
+            // 重启后既误判成已展示（漏掉重试）又没告诉后端（导致漏通知）。
+            markNotificationsSeen(ids)
+            const persisted = persistSeenNotificationsNow()
+            if (persisted) {
+              if (notif.ack_required) {
+                void ackNotifications(ids, notif.news_ids?.length ? notif.news_ids : notif.news_id)
+              }
+            } else {
+              // 内存态已标记 seen，本进程运行期间不会重复弹窗；落盘失败只记日志，
+              // 不 ACK——后端继续保留 pending，下一轮 poll 会走 isNotificationSeen
+              // 分支重试落盘 + ACK
+              console.error(
+                '[Notification] seen persist failed after show, will retry ack on next poll:',
+                ids
+              )
+            }
+            release()
+          })
+
+          notification.on('failed', (_event, error) => {
+            // 构造/展示失败：不写 seen、不 ACK，下一轮 poll 当作全新通知重试
+            clearInFlight()
+            console.error('[Notification] failed to show notification:', error)
+            release()
+          })
+
+          try {
+            notification.show()
+          } catch (err) {
+            console.error('[Notification] show() threw:', err)
+            clearInFlight()
+            release()
+          }
         })
       }
     } catch (e) {
       // API might not be ready yet, ignore errors
     }
   }
-  
+
   // Poll for notifications every 2 seconds
   setInterval(pollNotifications, 2000)
+
+  // 后台低频清理过期的 seen 记录（非关键路径，允许防抖落盘）
+  setInterval(pruneExpiredSeenNotifications, 10 * 60 * 1000)
 
   // IPC handlers for config
   ipcMain.handle('suspend-shortcut', () => {
@@ -916,7 +1214,29 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle('open-external', async (_, url: string) => {
-    shell.openExternal(url)
+    const target = typeof url === 'string' ? url.trim() : ''
+    if (!target) {
+      return { success: false, error: '链接为空' }
+    }
+    let parsed: URL
+    try {
+      parsed = new URL(target)
+    } catch (e) {
+      console.error('[Main] open-external rejected invalid URL:', target)
+      return { success: false, error: '无效的链接地址' }
+    }
+    // 只允许 http/https，拒绝 file:/自定义协议等，防止渲染进程诱导打开本地文件
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      console.error('[Main] open-external rejected disallowed protocol:', parsed.protocol)
+      return { success: false, error: `不允许打开该类型的链接：${parsed.protocol}` }
+    }
+    try {
+      await shell.openExternal(target)
+      return { success: true }
+    } catch (e) {
+      console.error('[Main] open-external failed:', e)
+      return { success: false, error: e instanceof Error ? e.message : String(e) }
+    }
   })
 
   ipcMain.handle('save-config', async (_, data) => {
@@ -943,6 +1263,7 @@ app.whenReady().then(() => {
   // Clean up on exit
   app.on('will-quit', () => {
     globalShortcut.unregisterAll()
+    persistSeenNotificationsNow()
   })
 
   ipcMain.on('submit-input', async (_, text, sessionId?: string) => {
@@ -1206,6 +1527,10 @@ app.whenReady().then(() => {
     return getVersion()
   })
 
+  ipcMain.handle('set-title-bar-theme', (_e, theme: 'dark' | 'light') => {
+    applyTitleBarTheme(chatWindow, theme === 'light' ? 'light' : 'dark')
+  })
+
   ipcMain.handle('get-config-dir', () => {
     return join(app.getPath('appData'), 'fin-agent')
   })
@@ -1227,6 +1552,91 @@ app.whenReady().then(() => {
       return { success: false, error: String(e) }
     }
   })
+
+  ipcMain.handle('list-news-subscriptions', async (
+    _e,
+    filters?: { enabled?: boolean; type?: string }
+  ) => {
+    const params = new URLSearchParams()
+    if (filters?.enabled !== undefined) params.set('enabled', String(filters.enabled))
+    if (filters?.type) params.set('type', filters.type)
+    const query = params.toString()
+    return makeApiRequest(`/news/subscriptions${query ? `?${query}` : ''}`)
+  })
+
+  ipcMain.handle('create-news-subscription', async (_e, payload: unknown) =>
+    makeApiRequest('/news/subscriptions/create', 'POST', payload)
+  )
+
+  ipcMain.handle('update-news-subscription', async (_e, id: string, payload: unknown) =>
+    makeApiRequest('/news/subscriptions/update', 'POST', {
+      ...(payload as Record<string, unknown>),
+      id
+    })
+  )
+
+  ipcMain.handle('delete-news-subscription', async (_e, id: string) =>
+    makeApiRequest('/news/subscriptions/delete', 'POST', { id })
+  )
+
+  ipcMain.handle('toggle-news-subscription', async (_e, id: string, enabled: boolean) =>
+    makeApiRequest('/news/subscriptions/toggle', 'POST', { id, enabled })
+  )
+
+  ipcMain.handle('list-news', async (
+    _e,
+    filters?: {
+      page?: number
+      pageSize?: number
+      unread?: boolean
+      type?: string
+      source?: string
+      symbol?: string
+      query?: string
+      subscriptionId?: string
+      newsId?: string
+    }
+  ) => {
+    const params = new URLSearchParams()
+    params.set('page', String(filters?.page ?? 1))
+    params.set('page_size', String(filters?.pageSize ?? 50))
+    if (filters?.unread !== undefined) params.set('unread', String(filters.unread))
+    if (filters?.type) params.set('type', filters.type)
+    if (filters?.source) params.set('source', filters.source)
+    if (filters?.symbol) params.set('symbol', filters.symbol)
+    if (filters?.query) params.set('query', filters.query)
+    if (filters?.subscriptionId) params.set('subscription_id', filters.subscriptionId)
+    if (filters?.newsId) params.set('id', filters.newsId)
+    return makeApiRequest(`/news?${params.toString()}`)
+  })
+
+  ipcMain.handle('get-news-unread-count', async () =>
+    makeApiRequest('/news/unread-count')
+  )
+
+  ipcMain.handle('mark-news-read', async (_e, id: string, read: boolean = true) =>
+    makeApiRequest('/news/mark-read', 'POST', { id, read })
+  )
+
+  ipcMain.handle('mark-news-read-batch', async (_e, ids: string[], read: boolean = true) =>
+    makeApiRequest('/news/mark-read-batch', 'POST', { ids, read })
+  )
+
+  ipcMain.handle('mark-all-news-read', async () =>
+    makeApiRequest('/news/mark-all-read', 'POST', {})
+  )
+
+  ipcMain.handle('clear-news', async () =>
+    makeApiRequest('/news/clear', 'POST', {})
+  )
+
+  ipcMain.handle('get-news-monitor-status', async () =>
+    makeApiRequest('/news/monitor/status')
+  )
+
+  ipcMain.handle('refresh-news', async () =>
+    makeApiRequest('/news/refresh', 'POST', {})
+  )
 
   ipcMain.handle('list-sessions', async (_e, offset: number, limit: number) => {
     return makeApiRequest(`/sessions?offset=${offset ?? 0}&limit=${limit ?? 30}`)

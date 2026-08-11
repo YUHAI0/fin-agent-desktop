@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react'
+import { Pin, Pencil, Trash2, Search } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
+import { useAppDialog } from '../contexts/AppDialogContext'
 
 interface HistoryDrawerProps {
   open: boolean
@@ -19,6 +21,7 @@ function groupLabel(updatedAt: number): string {
 
 const HistoryDrawer: React.FC<HistoryDrawerProps> = ({ open, onClose }) => {
   const { openSession, refreshTabs } = useChat()
+  const { confirm, prompt } = useAppDialog()
   const [sessions, setSessions] = useState<SessionMeta[]>([])
   const [total, setTotal] = useState(0)
   const [keyword, setKeyword] = useState('')
@@ -57,7 +60,11 @@ const HistoryDrawer: React.FC<HistoryDrawerProps> = ({ open, onClose }) => {
   }
 
   const handleRename = async (session: SessionMeta) => {
-    const next = window.prompt('重命名会话', session.title)
+    const next = await prompt({
+      title: '重命名会话',
+      defaultValue: session.title,
+      placeholder: '输入新的会话名称'
+    })
     if (!next) return
     await window.api.renameSession(session.id, next)
     await refreshTabs()
@@ -65,7 +72,13 @@ const HistoryDrawer: React.FC<HistoryDrawerProps> = ({ open, onClose }) => {
   }
 
   const handleDelete = async (session: SessionMeta) => {
-    if (!window.confirm(`确定删除会话「${session.title}」？此操作不可恢复。`)) return
+    const ok = await confirm({
+      title: '删除会话',
+      message: `确定删除会话「${session.title}」？此操作不可恢复。`,
+      confirmLabel: '删除',
+      danger: true
+    })
+    if (!ok) return
     await window.api.deleteSession(session.id)
     await refreshTabs()
     void loadPage(0)
@@ -81,27 +94,39 @@ const HistoryDrawer: React.FC<HistoryDrawerProps> = ({ open, onClose }) => {
   let lastGroup = ''
 
   return (
-    <div className="absolute inset-0 z-40">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="absolute left-0 top-0 bottom-0 w-[280px] bg-white dark:bg-gray-900 shadow-xl flex flex-col">
-        <div className="p-3 border-b border-gray-200 dark:border-gray-700">
-          <input
-            value={keyword}
-            onChange={(e) => setKeyword(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') void runSearch()
-            }}
-            placeholder="搜索历史会话，回车确认"
-            className="w-full px-2 py-1 text-sm border rounded dark:bg-gray-800 dark:border-gray-700"
-          />
+    <div className="absolute inset-0 z-40 animate-fade-in">
+      <div className="absolute inset-0 bg-black/55 backdrop-blur-[2px]" onClick={onClose} aria-hidden />
+      <div
+        className="absolute left-0 top-0 bottom-0 flex w-[300px] flex-col border-r border-[var(--fa-border)] bg-[var(--fa-sidebar)] shadow-2xl animate-scale-in"
+        role="dialog"
+        aria-label="历史会话"
+      >
+        <div className="border-b border-[var(--fa-border-subtle)] p-3">
+          <div className="relative">
+            <Search
+              size={14}
+              className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--fa-faint)]"
+              aria-hidden
+            />
+            <input
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void runSearch()
+              }}
+              placeholder="搜索历史会话，回车确认"
+              className="w-full rounded-lg border border-[var(--fa-border)] bg-[var(--fa-surface)] py-2 pl-8 pr-3 text-sm text-[var(--fa-text)] placeholder:text-[var(--fa-faint)] outline-none focus:border-[var(--fa-accent)]/50"
+              aria-label="搜索历史会话"
+            />
+          </div>
           {searching && truncated && (
-            <p className="text-xs text-amber-600 mt-1">会话较多，仅显示部分匹配结果</p>
+            <p className="mt-1.5 text-xs text-amber-400/90">会话较多，仅显示部分匹配结果</p>
           )}
         </div>
 
         <div className="flex-1 overflow-y-auto p-2">
           {sessions.length === 0 && (
-            <p className="text-xs text-gray-400 text-center mt-6">没有找到会话</p>
+            <p className="mt-6 text-center text-xs text-[var(--fa-faint)]">没有找到会话</p>
           )}
           {sessions.map((session) => {
             const label = searching ? '' : groupLabel(session.updated_at)
@@ -110,28 +135,51 @@ const HistoryDrawer: React.FC<HistoryDrawerProps> = ({ open, onClose }) => {
             return (
               <div key={session.id}>
                 {showLabel && (
-                  <div className="text-[10px] uppercase text-gray-400 px-2 pt-2 pb-1">{label}</div>
+                  <div className="px-2 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wider text-[var(--fa-faint)]">
+                    {label}
+                  </div>
                 )}
-                <div className="group flex items-center gap-1 px-2 py-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800">
+                <div className="group flex items-center gap-1 rounded-lg px-2 py-1.5 transition-colors duration-200 hover:bg-[var(--fa-surface-hover)]">
                   <button
+                    type="button"
                     onClick={() => void handleOpen(session.id)}
-                    className="flex-1 min-w-0 text-left"
+                    className="min-w-0 flex-1 cursor-pointer text-left"
                   >
-                    <div className="text-sm truncate text-gray-800 dark:text-gray-200">
-                      {session.pinned ? '📌 ' : ''}
-                      {session.title}
+                    <div className="flex items-center gap-1 truncate text-sm text-[var(--fa-text)]">
+                      {session.pinned && (
+                        <Pin size={12} className="shrink-0 text-[var(--fa-accent)]" aria-label="已置顶" />
+                      )}
+                      <span className="truncate">{session.title}</span>
                     </div>
-                    <div className="text-[11px] truncate text-gray-400">{session.preview}</div>
+                    <div className="truncate text-[11px] text-[var(--fa-faint)]">{session.preview}</div>
                   </button>
-                  <div className="opacity-0 group-hover:opacity-100 flex gap-0.5 shrink-0">
-                    <button onClick={() => void handlePin(session)} title="置顶" className="px-1 text-xs">
-                      📌
+                  <div className="flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                    <button
+                      type="button"
+                      onClick={() => void handlePin(session)}
+                      title="置顶"
+                      aria-label="置顶"
+                      className="cursor-pointer rounded p-1.5 text-[var(--fa-muted)] hover:text-[var(--fa-accent)]"
+                    >
+                      <Pin size={14} />
                     </button>
-                    <button onClick={() => void handleRename(session)} title="重命名" className="px-1 text-xs">
-                      ✎
+                    <button
+                      type="button"
+                      onClick={() => void handleRename(session)}
+                      title="重命名"
+                      aria-label="重命名"
+                      className="cursor-pointer rounded p-1.5 text-[var(--fa-muted)] hover:text-[var(--fa-text)]"
+                    >
+                      <Pencil size={14} />
                     </button>
-                    <button onClick={() => void handleDelete(session)} title="删除" className="px-1 text-xs">
-                      🗑
+                    <button
+                      type="button"
+                      onClick={() => void handleDelete(session)}
+                      title="删除"
+                      aria-label="删除"
+                      className="cursor-pointer rounded p-1.5 text-[var(--fa-muted)] hover:text-[var(--fa-danger)]"
+                    >
+                      <Trash2 size={14} />
                     </button>
                   </div>
                 </div>
@@ -142,8 +190,9 @@ const HistoryDrawer: React.FC<HistoryDrawerProps> = ({ open, onClose }) => {
 
         {!searching && sessions.length < total && (
           <button
+            type="button"
             onClick={() => void loadPage(sessions.length)}
-            className="p-2 text-xs text-blue-600 hover:bg-gray-100 dark:hover:bg-gray-800 border-t border-gray-200 dark:border-gray-700"
+            className="cursor-pointer border-t border-[var(--fa-border-subtle)] p-2.5 text-xs text-[var(--fa-accent)] transition-colors hover:bg-[var(--fa-surface-hover)]"
           >
             更多（还有 {total - sessions.length} 个）
           </button>
