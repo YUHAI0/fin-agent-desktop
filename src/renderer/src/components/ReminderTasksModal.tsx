@@ -248,8 +248,6 @@ export const ReminderTasksModal: React.FC<ReminderTasksModalProps> = ({ open, on
                         </div>
                         <div className="mt-1.5 text-xs text-[var(--fa-muted)]">
                           条件：价格 {t.operator} {t.threshold}
-                          <span className="text-[var(--fa-faint)]"> · </span>
-                          {t.enabled !== false ? '启用' : '已停用'}
                           {t.email ? ` · ${t.email}` : ''}
                         </div>
                         <div className="mt-0.5 text-[11px] text-[var(--fa-faint)]">

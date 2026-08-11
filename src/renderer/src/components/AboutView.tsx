@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { ArrowLeft } from 'lucide-react'
 import donateWechat from '../assets/donate-wechat.png'
 import SubPageShell from './SubPageShell'
 
@@ -12,11 +13,9 @@ const SHOW_GITHUB_SPONSORS = false
 const AboutView: React.FC = () => {
   const navigate = useNavigate()
   const [version, setVersion] = useState('')
-  const [configDir, setConfigDir] = useState('')
 
   useEffect(() => {
     void window.api.getVersion().then(setVersion)
-    void window.api.getConfigDir().then(setConfigDir)
   }, [])
 
   const open = (url: string) => () => void window.api.openExternal(url)
@@ -27,11 +26,13 @@ const AboutView: React.FC = () => {
         <button
           type="button"
           onClick={() => navigate(-1)}
-          className="cursor-pointer text-sm text-[var(--fa-muted)] transition-colors hover:text-[var(--fa-text)]"
+          className="cursor-pointer rounded-lg p-2 text-[var(--fa-muted)] transition-colors duration-200 hover:bg-[var(--fa-surface-hover)] hover:text-[var(--fa-text)]"
+          title="返回"
+          aria-label="返回"
         >
-          ← 返回
+          <ArrowLeft size={18} />
         </button>
-        <h1 className="text-sm font-medium">关于 / 支持</h1>
+        <h1 className="text-sm font-semibold">关于 / 支持</h1>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
@@ -89,11 +90,6 @@ const AboutView: React.FC = () => {
             alt="微信收款码"
             className="mx-auto mt-4 h-44 w-44 rounded-xl border border-[var(--fa-border)] object-contain bg-white p-2"
           />
-        </div>
-
-        <div className="mt-10 border-t border-[var(--fa-border-subtle)] pt-4">
-          <p className="text-xs text-[var(--fa-faint)]">配置与日志目录</p>
-          <p className="mt-1 break-all font-mono text-xs text-[var(--fa-muted)]">{configDir}</p>
         </div>
       </div>
       </div>

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, ExternalLink, Loader2, Search, X } from 'lucide-react'
 import FaSelect from '../FaSelect'
 import { useAppDialog } from '../../contexts/AppDialogContext'
-import { NEWS_SOURCE_LABELS, NEWS_TYPE_LABELS, formatNewsTime } from '../../utils/news'
+import { NEWS_SOURCE_LABELS, NEWS_SENTIMENT_LABELS, NEWS_TYPE_LABELS, formatNewsTime, sentimentBadgeClass } from '../../utils/news'
 
 const PAGE_SIZE = 20
 
@@ -465,8 +465,13 @@ const NewsFeedTab: React.FC<NewsFeedTabProps> = ({
                     } ${isHighlighted ? 'ring-2 ring-[var(--fa-accent)]' : ''}`}
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <div className="flex min-w-0 items-center gap-1.5">
+                      <div className="flex min-w-0 flex-1 items-center gap-1.5">
                         {!item.read && <span className="fa-news-dot" aria-hidden />}
+                        {item.sentiment && (
+                          <span className={sentimentBadgeClass(item.sentiment)}>
+                            {NEWS_SENTIMENT_LABELS[item.sentiment]}
+                          </span>
+                        )}
                         <h3 className="min-w-0 truncate text-sm font-medium text-[var(--fa-text)]">
                           {item.title}
                         </h3>

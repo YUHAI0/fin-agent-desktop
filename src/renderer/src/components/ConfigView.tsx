@@ -44,6 +44,7 @@ const ConfigView: React.FC = () => {
   const [alertInterval, setAlertInterval] = useState('10')
   const [tradingHoursOnly, setTradingHoursOnly] = useState(true)
   const [newsPollInterval, setNewsPollInterval] = useState(String(DEFAULT_NEWS_POLL_INTERVAL))
+  const [newsSentimentEnabled, setNewsSentimentEnabled] = useState(true)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [shortcutStatus, setShortcutStatus] = useState<{valid: boolean, message: string} | null>(null)
@@ -82,6 +83,7 @@ const ConfigView: React.FC = () => {
           setAlertInterval(String(config.alert_poll_interval_minutes ?? 10))
           setTradingHoursOnly(config.alert_trading_hours_only ?? true)
           setNewsPollInterval(String(normalizeNewsPollInterval(config.news_poll_interval_minutes)))
+          setNewsSentimentEnabled(config.news_sentiment_enabled ?? true)
         }
         const isAutoLaunch = await window.api.getAutoLaunch()
         setAutoLaunch(isAutoLaunch)
@@ -116,7 +118,8 @@ const ConfigView: React.FC = () => {
         email_receiver: emailReceiver,
         alert_poll_interval_minutes: Math.min(Math.max(Number(alertInterval) || 10, 1), 120),
         alert_trading_hours_only: tradingHoursOnly,
-        news_poll_interval_minutes: normalizeNewsPollInterval(newsPollInterval)
+        news_poll_interval_minutes: normalizeNewsPollInterval(newsPollInterval),
+        news_sentiment_enabled: newsSentimentEnabled
       }
 
       const result = await window.api.saveConfig(config)
@@ -394,8 +397,9 @@ const ConfigView: React.FC = () => {
                   placeholder="点击此处并按下按键（例如：Ctrl+Alt+Q）"
                   title="点击以聚焦并输入您的快捷键"
                 />
-                <div className="flex justify-between items-center text-xs">
+                <div className="flex flex-col gap-1 text-xs">
                     <p className="fa-hint">点击输入框并按下按键组合。Backspace/Delete 清除。</p>
+                    <p className="fa-hint">快捷键显示/隐藏主窗口，与托盘图标行为一致。</p>
                     {shortcutStatus && (
                         <span className={shortcutStatus.valid ? 'text-emerald-400' : 'text-red-400'}>
                             {shortcutStatus.message === 'Shortcut is already in use by another application' 
@@ -465,6 +469,21 @@ const ConfigView: React.FC = () => {
                   ]}
                 />
                 <p className="fa-hint">新闻监控独立运行，不受交易时段限制，按此频率 7×24 小时轮询订阅的新闻源。</p>
+             </div>
+             <div className="flex items-center justify-between py-2">
+                <div>
+                  <label className="fa-label">新闻利好/利空标注</label>
+                  <p className="fa-hint">
+                    开启后使用 LLM 自动为新闻打上利好、利空或中性标签，显示在新闻列表中。
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setNewsSentimentEnabled(!newsSentimentEnabled)}
+                  className={`relative inline-flex h-6 w-11 cursor-pointer items-center rounded-full transition-colors ${newsSentimentEnabled ? 'fa-toggle-on' : 'fa-toggle-off'}`}
+                >
+                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${newsSentimentEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                </button>
              </div>
           </div>
 

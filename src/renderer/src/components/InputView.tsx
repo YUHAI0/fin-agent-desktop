@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Settings } from 'lucide-react'
+import { Search, Settings } from 'lucide-react'
 
 const InputView: React.FC = () => {
   const [value, setValue] = useState('')
@@ -7,99 +7,101 @@ const InputView: React.FC = () => {
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
+    document.documentElement.classList.add('fa-quick-input-page')
+    return () => {
+      document.documentElement.classList.remove('fa-quick-input-page')
+    }
+  }, [])
+
+  useEffect(() => {
     inputRef.current?.focus()
 
     const removeFocusListener = window.api.onFocusInput(() => {
-        console.log('[InputView] Received focus-input event')
-        setTimeout(() => {
-            inputRef.current?.focus()
-        }, 50)
+      setTimeout(() => {
+        inputRef.current?.focus()
+      }, 50)
     })
-    
-    // 监听AI响应状态
+
     const removeBotStreamListener = window.api.onBotStream((data: any) => {
-        if (!data) return
-        
-        // 仅在无 sessionId（旧路径）或与当前无关时仍更新状态——快捷输入窗只看全局结束信号
-        setIsResponding(prev => {
-            if (!prev && (data.type === 'content' || data.type === 'answer' || data.type === 'thinking' || data.type === 'tool_call' || data.type === 'tool_call_chunk')) {
-                return true
-            }
-            if (data.type === 'error' || data.type === 'finish') {
-                return false // AI响应结束
-            }
-            return prev
-        })
-    })
-    
-    // 监听新消息，标记AI开始响应
-    const removeNewMessageListener = window.api.onNewMessage((payload) => {
-        const text = typeof payload === 'string' ? payload : payload?.text
-        if (text) {
-            setIsResponding(true)
+      if (!data) return
+      setIsResponding((prev) => {
+        if (
+          !prev &&
+          (data.type === 'content' ||
+            data.type === 'answer' ||
+            data.type === 'thinking' ||
+            data.type === 'tool_call' ||
+            data.type === 'tool_call_chunk')
+        ) {
+          return true
         }
+        if (data.type === 'error' || data.type === 'finish') {
+          return false
+        }
+        return prev
+      })
+    })
+
+    const removeNewMessageListener = window.api.onNewMessage((payload) => {
+      const text = typeof payload === 'string' ? payload : payload?.text
+      if (text) {
+        setIsResponding(true)
+      }
     })
 
     return () => {
-        removeFocusListener()
-        removeBotStreamListener()
-        removeNewMessageListener()
+      removeFocusListener()
+      removeBotStreamListener()
+      removeNewMessageListener()
     }
   }, [])
 
   const handleKeyDown = async (e: React.KeyboardEvent) => {
-    // 如果AI正在响应，禁止回车提交
     if (e.key === 'Enter' && isResponding) {
       e.preventDefault()
       return
     }
-    
+
     if (e.key === 'Enter') {
       if (value.trim()) {
         try {
           const status = await window.api.checkConfig()
           if (!status.configured) {
-            // 快捷键输入框太小，直接跳转到配置页面
             window.api.openSettings()
             return
           }
           window.api.submitInput(value)
           setValue('')
-          setIsResponding(true) // 标记AI开始响应
-        } catch (err) {
-          console.error('Config check failed:', err)
-          // If config check fails, assume not configured and redirect to config page
+          setIsResponding(true)
+        } catch {
           window.api.openSettings()
-          return
         }
       }
     } else if (e.key === 'Escape') {
-        // Optional: Hide window on Escape. Sending empty might trigger hide in main logic if we handle it.
-        // For now, let's just assume main handles focus loss or we can add a specific hide IPC.
-        window.api.submitInput('') 
+      window.api.submitInput('')
     }
   }
 
   return (
-    <div className="h-screen w-full flex items-center justify-center bg-gray-900/90 rounded-xl overflow-hidden border border-gray-700 shadow-2xl drag-region">
-      <div className="w-full px-4 flex items-center gap-4 no-drag h-full">
-        <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-        </svg>
+    <div className="fa-quick-input-shell">
+      <div className="fa-quick-input-inner">
+        <Search className="fa-quick-input-icon" size={22} strokeWidth={1.75} aria-hidden />
         <input
           ref={inputRef}
           type="text"
-          className="w-full bg-transparent text-white text-2xl outline-none placeholder-gray-500 font-light h-full py-4"
-          placeholder={isResponding ? "Fin-Agent 正在回复..." : "输入任何关于投资的问题..."}
+          className="fa-quick-input-field"
+          placeholder={isResponding ? 'Fin-Agent 正在回复…' : '输入任何关于投资的问题…'}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
           autoFocus
         />
         <button
+          type="button"
           onClick={() => window.api.openSettings()}
-          className="text-gray-400 hover:text-white transition-colors p-2 rounded hover:bg-gray-800"
+          className="fa-quick-input-settings"
           title="设置"
+          aria-label="设置"
         >
           <Settings size={20} />
         </button>
@@ -109,4 +111,3 @@ const InputView: React.FC = () => {
 }
 
 export default InputView
-

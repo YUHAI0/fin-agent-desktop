@@ -1,5 +1,5 @@
 import { app, BrowserWindow, globalShortcut, ipcMain, Tray, Menu, nativeImage, Notification, shell, screen } from 'electron'
-import { join } from 'path'
+import { join, dirname } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { spawn, ChildProcess, exec, execSync } from 'child_process'
 import { readFileSync, existsSync, appendFileSync, createWriteStream, unlink, writeFileSync, renameSync, mkdirSync } from 'fs'
@@ -47,11 +47,154 @@ function setupLogging() {
 }
 
 
-let inputWindow: BrowserWindow | null = null
 let chatWindow: BrowserWindow | null = null
 let tray: Tray | null = null
+
+// ─── 应用内浮动通知队列 ────────────────────────────────────────────────────────
+const TOAST_WIDTH = 360
+const TOAST_HEIGHT = 100
+const TOAST_MARGIN = 16
+const TOAST_DURATION_MS = 6000
+const TOAST_MAX_STACK = 5
+/** 当前屏幕上显示的通知浮窗，按从下到上排列（index 0 = 最新/最底部） */
+const toastStack: Array<{ win: BrowserWindow; timerId: ReturnType<typeof setTimeout> }> = []
+
+const UPDATE_TOAST_WIDTH = 360
+const UPDATE_TOAST_HEIGHT = 240
+let updateToastWindow: BrowserWindow | null = null
+
+type ToastPayload = DesktopNotificationPayload & {
+  /** 传给渲染层的已解析标题/正文（main 侧可能会改写） */
+  _title: string
+  _body: string
+}
+
+function getUpdateToastOffset(): number {
+  if (updateToastWindow && !updateToastWindow.isDestroyed()) {
+    return UPDATE_TOAST_HEIGHT + TOAST_MARGIN
+  }
+  return 0
+}
+
+function getToastStartY(index: number, workH: number): number {
+  const offset = getUpdateToastOffset()
+  return workH - TOAST_MARGIN - offset - (index + 1) * (TOAST_HEIGHT + TOAST_MARGIN)
+}
+
+function repositionToastStack(workH: number): void {
+  toastStack.forEach(({ win }, i) => {
+    if (!win.isDestroyed()) {
+      const y = getToastStartY(i, workH)
+      const [cx] = win.getPosition()
+      win.setPosition(cx, y, false)
+    }
+  })
+}
+
+function createToastWindow(payload: ToastPayload): void {
+  const display = screen.getPrimaryDisplay()
+  const { width: sw, height: sh } = display.workAreaSize
+  const x = sw - TOAST_WIDTH - TOAST_MARGIN
+  const y = sh + 20 // 从屏幕下方外面开始，再滑入
+
+  if (toastStack.length >= TOAST_MAX_STACK) {
+    // 关闭最旧的那个
+    const oldest = toastStack.pop()!
+    clearTimeout(oldest.timerId)
+    if (!oldest.win.isDestroyed()) {
+      oldest.win.webContents.send('toast-dismiss')
+      setTimeout(() => {
+        if (!oldest.win.isDestroyed()) oldest.win.close()
+      }, 250)
+    }
+  }
+
+  const win = new BrowserWindow({
+    width: TOAST_WIDTH,
+    height: TOAST_HEIGHT,
+    x,
+    y,
+    show: false,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    closable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    focusable: false,
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      sandbox: false
+    }
+  })
+  win.setAlwaysOnTop(true, 'screen-saver')
+
+  const closeToast = () => {
+    const idx = toastStack.findIndex((t) => t.win === win)
+    if (idx !== -1) toastStack.splice(idx, 1)
+    if (!win.isDestroyed()) {
+      win.webContents.send('toast-dismiss')
+      setTimeout(() => {
+        if (!win.isDestroyed()) win.close()
+      }, 300)
+    }
+    repositionToastStack(sh)
+  }
+
+  const timerId = setTimeout(closeToast, TOAST_DURATION_MS)
+  toastStack.unshift({ win, timerId })
+
+  win.webContents.on('did-finish-load', () => {
+    win.webContents.send('toast-show', { ...payload, _winId: win.id })
+    win.show()
+    // 滑入动画：setPosition 从屏幕外滑到目标位
+    const targetY = getToastStartY(0, sh)
+    repositionToastStack(sh)
+    win.setPosition(x, sh + 10, false)
+    // 使用多步动画（每帧约 16ms，动画约 250ms）
+    let step = 0
+    const steps = 16
+    const startY = sh + 10
+    const endY = targetY
+    const animate = () => {
+      step++
+      const t = step / steps
+      const eased = 1 - Math.pow(1 - t, 3) // ease-out cubic
+      const curY = Math.round(startY + (endY - startY) * eased)
+      if (!win.isDestroyed()) win.setPosition(x, curY, false)
+      if (step < steps) setTimeout(animate, 16)
+    }
+    animate()
+  })
+
+  const onToastClick = (_event: Electron.IpcMainEvent) => {
+    if (_event.sender.id !== win.webContents.id) return
+    clearTimeout(timerId)
+    closeToast()
+    handleNotificationActivation(payload)
+    ipcMain.off('toast-click', onToastClick)
+    ipcMain.off('toast-close', onToastClose)
+  }
+  const onToastClose = (_event: Electron.IpcMainEvent) => {
+    if (_event.sender.id !== win.webContents.id) return
+    clearTimeout(timerId)
+    closeToast()
+    ipcMain.off('toast-click', onToastClick)
+    ipcMain.off('toast-close', onToastClose)
+  }
+  ipcMain.on('toast-click', onToastClick)
+  ipcMain.on('toast-close', onToastClose)
+
+  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+    win.loadURL(`${process.env['ELECTRON_RENDERER_URL']}/#/toast`)
+  } else {
+    win.loadFile(join(__dirname, '../renderer/index.html'), { hash: 'toast' })
+  }
+}
 let pyProc: ChildProcess | null = null
-let hasConversationContext = false  // 跟踪是否有对话上下文
 let isCleaningUp = false  // 防止重复执行清理
 const activeRequests = new Map<string, http.ClientRequest>()  // sessionKey -> 进行中的 HTTP 请求
 const userStoppedKeys = new Set<string>()  // 用户主动停止的请求 key
@@ -65,12 +208,10 @@ const userStoppedKeys = new Set<string>()  // 用户主动停止的请求 key
 // 之所以只在 show 事件之后才落 seen/ACK：show() 是异步展示，调用后立即
 // ack 无法保证系统真的把通知弹出来了；只有 show 事件才是“已确认展示”。
 const inFlightNotificationIds = new Set<string>()
-// 持有正在等待事件的 Notification 引用，防止提前被 GC 回收导致
-// show/failed 事件永远不触发（Electron 已知坑，事件由原生层异步派发）。
-const retainedNotifications = new Set<Notification>()
 const seenNotificationIds = new Map<string, number>()
-const NOTIFICATION_SEEN_TTL_MS = 30 * 24 * 60 * 60 * 1000 // 与 pending 生命周期一致，至少 30 天
+const NOTIFICATION_SEEN_TTL_MS = 30 * 24 * 60 * 60 * 1000
 const NOTIFICATION_SEEN_MAX_SIZE = 5000
+const APP_USER_MODEL_ID = 'com.finagent.desktop'
 let seenNotificationsFilePath = ''
 let seenNotificationsDirty = false
 let seenNotificationsSaveTimer: ReturnType<typeof setTimeout> | null = null
@@ -88,6 +229,8 @@ type DesktopNotificationPayload = {
   subscription_ids?: string[]
   source?: string
   url?: string
+  task_id?: string
+  ts_code?: string
   ack_required?: boolean
 }
 
@@ -181,6 +324,87 @@ function markNotificationsSeen(ids: string[]): void {
     seenNotificationIds.delete(oldest)
   }
 }
+
+function confirmNotificationDelivery(
+  ids: string[],
+  notif: DesktopNotificationPayload
+): void {
+  if (ids.length === 0) return
+  markNotificationsSeen(ids)
+  const persisted = persistSeenNotificationsNow()
+  if (persisted) {
+    if (notif.ack_required) {
+      void ackNotifications(ids, notif.news_ids?.length ? notif.news_ids : notif.news_id)
+    }
+  } else {
+    console.error(
+      '[Notification] seen persist failed after show, will retry ack on next poll:',
+      ids
+    )
+  }
+}
+
+function handleNotificationActivation(notif: DesktopNotificationPayload): void {
+  if (!chatWindow) return
+  if (chatWindow.isMinimized()) {
+    chatWindow.restore()
+  }
+  chatWindow.show()
+  chatWindow.focus()
+  if (notif.type === 'price_alert') {
+    chatWindow.webContents.send('navigate-route', '/')
+    chatWindow.webContents.send('price-alert-notification-open', {
+      taskId: notif.task_id || undefined,
+      tsCode: notif.ts_code || undefined
+    })
+    return
+  }
+  if (notif.type === 'news' || notif.news_id || notif.merged) {
+    const newsId = notif.merged ? undefined : notif.news_id || undefined
+    const location = {
+      newsId,
+      subscriptionId: notif.subscription_id || undefined,
+      subscriptionIds: notif.subscription_ids || [],
+      source: notif.source,
+      url: notif.merged ? undefined : notif.url
+    }
+    const routeParams = new URLSearchParams()
+    if (newsId) routeParams.set('newsId', newsId)
+    if (notif.subscription_id) {
+      routeParams.set('subscriptionId', notif.subscription_id)
+    }
+    const routeQuery = routeParams.toString()
+    chatWindow.webContents.send('navigate-route', `/news${routeQuery ? `?${routeQuery}` : ''}`)
+    chatWindow.webContents.send('news-notification-open', location)
+  }
+}
+
+function ensureWindowsToastShortcut(): void {
+  if (process.platform !== 'win32') return
+  try {
+    const programsDir = join(
+      app.getPath('appData'),
+      'Microsoft', 'Windows', 'Start Menu', 'Programs'
+    )
+    mkdirSync(programsDir, { recursive: true })
+    const shortcutPath = join(programsDir, 'Fin-Agent.lnk')
+    const operation = existsSync(shortcutPath) ? 'update' : 'create'
+    const ok = shell.writeShortcutLink(shortcutPath, operation, {
+      target: process.execPath,
+      cwd: dirname(process.execPath),
+      description: 'Fin-Agent 金融助手',
+      icon: process.execPath,
+      iconIndex: 0,
+      appUserModelId: APP_USER_MODEL_ID
+    })
+    console.log(ok
+      ? `[Notification] Windows shortcut ready: ${shortcutPath}`
+      : '[Notification] Failed to create Windows shortcut')
+  } catch (err) {
+    console.error('[Notification] ensureWindowsToastShortcut error:', err)
+  }
+}
+
 
 async function ackNotifications(ids: string[], newsIdsInput?: string | string[] | null): Promise<void> {
   const notificationIds = [...new Set(ids.filter(Boolean))]
@@ -438,40 +662,13 @@ async function startPythonServer() {
   })
 }
 
-function createInputWindow(): void {
-  inputWindow = new BrowserWindow({
-    width: 600,
-    height: 80, // Slightly larger for padding
-    show: false,
-    frame: false,
-    transparent: true,
-    resizable: false,
-    alwaysOnTop: true,
-    skipTaskbar: true,
-    webPreferences: {
-      preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
-    }
-  })
-
-  inputWindow.on('blur', () => {
-    inputWindow?.hide()
-  })
-
-  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    inputWindow.loadURL(`${process.env['ELECTRON_RENDERER_URL']}/#/input`)
-  } else {
-    inputWindow.loadFile(join(__dirname, '../renderer/index.html'), { hash: 'input' })
-  }
-}
-
 /** 与 renderer index.css --fa-titlebar-height 保持一致 */
 const TITLE_BAR_HEIGHT = 40
 
-/** 与 renderer index.css --fa-sidebar / --fa-muted 对齐 */
+/** 与连续玻璃 chrome 底色对齐，系统按钮区不突兀 */
 const TITLE_BAR_THEME = {
-  dark: { color: '#0d0d0d', symbolColor: '#8e8e8e' },
-  light: { color: '#ffffff', symbolColor: '#52525b' }
+  dark: { overlay: '#121212', background: '#0a0a0a', symbolColor: '#8e8e8e' },
+  light: { overlay: '#eceef1', background: '#e8eaed', symbolColor: '#52525b' }
 } as const
 
 function supportsTitleBarOverlay(): boolean {
@@ -481,9 +678,9 @@ function supportsTitleBarOverlay(): boolean {
 function applyTitleBarTheme(win: BrowserWindow | null, theme: keyof typeof TITLE_BAR_THEME = 'dark'): void {
   if (!win || win.isDestroyed() || !supportsTitleBarOverlay()) return
   const palette = TITLE_BAR_THEME[theme]
-  win.setBackgroundColor(palette.color)
+  win.setBackgroundColor(palette.background)
   win.setTitleBarOverlay({
-    color: palette.color,
+    color: palette.overlay,
     symbolColor: palette.symbolColor,
     height: TITLE_BAR_HEIGHT
   })
@@ -503,12 +700,13 @@ function createChatWindow(): void {
     show: false,
     autoHideMenuBar: true,
     title: 'Fin-Agent',
-    backgroundColor: TITLE_BAR_THEME.dark.color,
+    backgroundColor: TITLE_BAR_THEME.dark.background,
     ...(supportsTitleBarOverlay()
       ? {
           titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
           titleBarOverlay: {
-            ...TITLE_BAR_THEME.dark,
+            color: TITLE_BAR_THEME.dark.overlay,
+            symbolColor: TITLE_BAR_THEME.dark.symbolColor,
             height: TITLE_BAR_HEIGHT
           }
         }
@@ -542,7 +740,7 @@ function createTray() {
   tray = new Tray(icon)
   
   const contextMenu = Menu.buildFromTemplate([
-    { label: '显示/隐藏', click: () => toggleMainWindow() },
+    { label: '显示/隐藏', click: () => toggleChatWindow() },
     { type: 'separator' },
     { label: '退出', click: async () => {
         // 检查是否有正在进行的生成
@@ -555,23 +753,15 @@ function createTray() {
                 chatWindow.destroy()
                 chatWindow = null
             }
-            if (inputWindow) {
-                inputWindow.destroy()
-                inputWindow = null
-            }
             app.quit()
             return
           }
           
-          // 优先显示聊天窗口，隐藏输入窗口
+          // 优先显示聊天窗口
           if (chatWindow) {
             if (!chatWindow.isVisible()) {
               chatWindow.show()
               chatWindow.focus()
-            }
-            // 隐藏输入窗口（如果可见）
-            if (inputWindow && inputWindow.isVisible()) {
-              inputWindow.hide()
             }
             
             // 最后一次检查，确保请求还在进行
@@ -581,10 +771,6 @@ function createTray() {
               if (chatWindow) {
                   chatWindow.destroy()
                   chatWindow = null
-              }
-              if (inputWindow) {
-                  inputWindow.destroy()
-                  inputWindow = null
               }
               app.quit()
               return
@@ -613,10 +799,6 @@ function createTray() {
                   chatWindow.destroy()
                   chatWindow = null
               }
-              if (inputWindow) {
-                  inputWindow.destroy()
-                  inputWindow = null
-              }
               app.quit()
               return
             }
@@ -640,10 +822,6 @@ function createTray() {
             chatWindow.destroy()
             chatWindow = null
         }
-        if (inputWindow) {
-            inputWindow.destroy()
-            inputWindow = null
-        }
         app.quit()
     }}
   ])
@@ -652,7 +830,7 @@ function createTray() {
   tray.setContextMenu(contextMenu)
   
   tray.on('double-click', () => {
-    toggleMainWindow()
+    toggleChatWindow()
   })
 }
 
@@ -678,13 +856,6 @@ if (!gotTheLock) {
       chatWindow.show()
       chatWindow.focus()
       chatWindow.webContents.send('focus-input')
-    } else if (inputWindow) {
-      if (inputWindow.isMinimized()) {
-        inputWindow.restore()
-      }
-      inputWindow.show()
-      inputWindow.focus()
-      inputWindow.webContents.send('focus-input')
     }
   })
 }
@@ -697,76 +868,33 @@ app.commandLine.appendSwitch('disable-http-cache')
 // 在某些 Windows 系统上避免缓存目录权限问题
 app.commandLine.appendSwitch('disk-cache-size', '0')
 
-// 切换主窗口显示状态
-function toggleMainWindow() {
-  // 检查是否在配置页面，如果是则不允许切换
-  if (chatWindow && chatWindow.isVisible()) {
-    const url = chatWindow.webContents.getURL()
-    // 检查 URL 中是否包含 #/config
-    if (url.includes('#/config') || url.includes('hash=config')) {
-      console.log('[Main] Currently in config page, ignoring shortcut')
-      return
-    }
-  }
-
-  // 优先处理聊天窗口：如果聊天窗口可见，则关闭它
-  if (chatWindow && chatWindow.isVisible()) {
+/**
+ * 显示/隐藏完整主窗口（聊天界面）。
+ * 全局快捷键与托盘「显示/隐藏」共用此逻辑。
+ */
+function toggleChatWindow(): void {
+  if (chatWindow?.isVisible()) {
     chatWindow.hide()
-    // 隐藏聊天窗口时，也隐藏输入框
-    if (inputWindow) {
-      inputWindow.hide()
-    }
     return
   }
 
-  // 如果聊天窗口不可见，根据是否有对话上下文决定显示哪个窗口
-  if (hasConversationContext) {
-    // 有上下文，显示对话窗口
-    if (chatWindow) {
-      if (chatWindow.isMinimized()) {
-        chatWindow.restore()
-      }
-      chatWindow.show()
-      chatWindow.focus()
-      chatWindow.webContents.send('focus-input')
-      // 显示聊天窗口时，确保输入框隐藏
-      if (inputWindow) {
-        inputWindow.hide()
-      }
+  if (chatWindow) {
+    if (chatWindow.isMinimized()) {
+      chatWindow.restore()
     }
-  } else {
-    // 没有上下文，显示输入框
-    if (inputWindow) {
-      if (inputWindow.isVisible()) {
-        inputWindow.hide()
-        // 隐藏输入框时，也隐藏聊天窗口
-        if (chatWindow) {
-          chatWindow.hide()
-        }
-      } else {
-        if (inputWindow.isMinimized()) {
-          inputWindow.restore()
-        }
-        inputWindow.show()
-        inputWindow.focus()
-        inputWindow.webContents.send('focus-input')
-        // 显示输入框时，确保聊天窗口隐藏
-        if (chatWindow) {
-          chatWindow.hide()
-        }
-      }
-    }
+    chatWindow.show()
+    chatWindow.focus()
+    chatWindow.webContents.send('focus-input')
   }
 }
 
-// Store current shortcut in a global variable for resumption
 let currentGlobalShortcut = 'Ctrl+Alt+Q'
 
 function registerGlobalShortcut(shortcut: string) {
   globalShortcut.unregisterAll()
   try {
     const ret = globalShortcut.register(shortcut, () => {
-      toggleMainWindow()
+      toggleChatWindow()
     })
 
     if (!ret) {
@@ -792,165 +920,218 @@ function compareVersions(v1: string, v2: string): number {
   return 0
 }
 
-function downloadFile(url: string, dest: string): Promise<void> {
+// ─── 应用内更新系统 ────────────────────────────────────────────────────────────
+
+interface UpdateInfo {
+  version: string
+  tagName: string
+  downloadUrl: string
+  fileName: string
+  releaseNotes: string
+}
+
+let pendingUpdate: UpdateInfo | null = null
+let updateDownloadPath = ''
+let updateDownloading = false
+
+function sendUpdateToastEvent(channel: string, data?: unknown): void {
+  if (updateToastWindow && !updateToastWindow.isDestroyed()) {
+    updateToastWindow.webContents.send(channel, data)
+  }
+}
+
+function closeUpdateToastWindow(): void {
+  if (!updateToastWindow || updateToastWindow.isDestroyed()) {
+    updateToastWindow = null
+    return
+  }
+  updateToastWindow.webContents.send('update-dismiss')
+  setTimeout(() => {
+    if (updateToastWindow && !updateToastWindow.isDestroyed()) {
+      updateToastWindow.close()
+    }
+    updateToastWindow = null
+    repositionToastStack(screen.getPrimaryDisplay().workAreaSize.height)
+  }, 280)
+}
+
+function slideInWindow(win: BrowserWindow, x: number, targetY: number, startY: number): void {
+  win.setPosition(x, startY, false)
+  let step = 0
+  const steps = 16
+  const animate = () => {
+    step++
+    const t = step / steps
+    const eased = 1 - Math.pow(1 - t, 3)
+    const curY = Math.round(startY + (targetY - startY) * eased)
+    if (!win.isDestroyed()) win.setPosition(x, curY, false)
+    if (step < steps) setTimeout(animate, 16)
+  }
+  animate()
+}
+
+function createUpdateToastWindow(info: UpdateInfo): void {
+  const display = screen.getPrimaryDisplay()
+  const { width: sw, height: sh } = display.workAreaSize
+  const x = sw - UPDATE_TOAST_WIDTH - TOAST_MARGIN
+  const targetY = sh - TOAST_MARGIN - UPDATE_TOAST_HEIGHT
+
+  if (updateToastWindow && !updateToastWindow.isDestroyed()) {
+    sendUpdateToastEvent('update-show', info)
+    updateToastWindow.show()
+    return
+  }
+
+  const win = new BrowserWindow({
+    width: UPDATE_TOAST_WIDTH,
+    height: UPDATE_TOAST_HEIGHT,
+    x,
+    y: sh + 10,
+    show: false,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    closable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    focusable: true,
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      sandbox: false
+    }
+  })
+  win.setAlwaysOnTop(true, 'screen-saver')
+  updateToastWindow = win
+
+  win.on('closed', () => {
+    if (updateToastWindow === win) updateToastWindow = null
+    repositionToastStack(screen.getPrimaryDisplay().workAreaSize.height)
+  })
+
+  const onDismiss = (event: Electron.IpcMainEvent) => {
+    if (event.sender.id !== win.webContents.id) return
+    if (updateDownloading) return
+    ipcMain.off('update-toast-dismiss', onDismiss)
+    closeUpdateToastWindow()
+  }
+  ipcMain.on('update-toast-dismiss', onDismiss)
+
+  win.webContents.on('did-finish-load', () => {
+    win.webContents.send('update-show', info)
+    win.show()
+    slideInWindow(win, x, targetY, sh + 10)
+    repositionToastStack(sh)
+  })
+
+  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+    win.loadURL(`${process.env['ELECTRON_RENDERER_URL']}/#/update-toast`)
+  } else {
+    win.loadFile(join(__dirname, '../renderer/index.html'), { hash: 'update-toast' })
+  }
+}
+
+function downloadFileWithProgress(
+  url: string,
+  dest: string,
+  onProgress: (percent: number, receivedBytes: number, totalBytes: number) => void
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const file = createWriteStream(dest)
-    
+
     const handleResponse = (response: http.IncomingMessage) => {
-      // Handle redirects
       if (response.statusCode === 301 || response.statusCode === 302) {
         if (response.headers.location) {
-          const redirectUrl = response.headers.location
-          console.log(`[Update] Redirecting to: ${redirectUrl}`)
-          https.get(redirectUrl, handleResponse).on('error', (err) => {
-            unlink(dest, () => {})
-            reject(err)
-          })
+          https.get(response.headers.location, { headers: { 'User-Agent': 'fin-agent-desktop' } }, handleResponse)
+            .on('error', (err) => { unlink(dest, () => {}); reject(err) })
           return
         }
       }
-
       if (response.statusCode !== 200) {
         unlink(dest, () => {})
-        reject(new Error(`Failed to download: ${response.statusCode}`))
+        reject(new Error(`Download failed: HTTP ${response.statusCode}`))
         return
       }
 
-      response.pipe(file)
-      
-      file.on('finish', () => {
-        file.close()
-        resolve()
+      const totalBytes = parseInt(response.headers['content-length'] || '0', 10)
+      let receivedBytes = 0
+
+      response.on('data', (chunk: Buffer) => {
+        receivedBytes += chunk.length
+        const percent = totalBytes > 0 ? Math.round((receivedBytes / totalBytes) * 100) : 0
+        onProgress(percent, receivedBytes, totalBytes)
       })
 
-      file.on('error', (err) => {
-        unlink(dest, () => {})
-        reject(err)
-      })
+      response.pipe(file)
+
+      file.on('finish', () => { file.close(); resolve() })
+      file.on('error', (err) => { unlink(dest, () => {}); reject(err) })
     }
 
     https.get(url, { headers: { 'User-Agent': 'fin-agent-desktop' } }, handleResponse)
-      .on('error', (err) => {
-        unlink(dest, () => {})
-        reject(err)
-      })
+      .on('error', (err) => { unlink(dest, () => {}); reject(err) })
   })
 }
 
 function checkForUpdates() {
   console.log('[Update] Starting update check...')
-  const options = {
-    hostname: 'api.github.com',
-    path: '/repos/YUHAI0/fin-agent-desktop/releases/latest',
-    method: 'GET',
-    headers: {
-      'User-Agent': 'fin-agent-desktop'
-    }
-  }
-
-  const req = https.request(options, (res) => {
-    let data = ''
-    res.on('data', (chunk) => {
-      data += chunk
-    })
-
-    res.on('end', () => {
-      if (res.statusCode === 200) {
+  const req = https.request(
+    {
+      hostname: 'api.github.com',
+      path: '/repos/YUHAI0/fin-agent-desktop/releases/latest',
+      method: 'GET',
+      headers: { 'User-Agent': 'fin-agent-desktop' }
+    },
+    (res) => {
+      let data = ''
+      res.on('data', (chunk) => (data += chunk))
+      res.on('end', () => {
+        if (res.statusCode !== 200) return
         try {
           const release = JSON.parse(data)
           const latestVersion = release.tag_name.replace(/^v/, '')
           const currentVersion = getVersion()
+          console.log(`[Update] current=${currentVersion}, latest=${latestVersion}`)
 
-          console.log(`[Update] Version check: current=${currentVersion}, latest=${latestVersion}`)
+          if (compareVersions(latestVersion, currentVersion) <= 0) return
 
-          if (compareVersions(latestVersion, currentVersion) > 0) {
-            console.log(`[Update] New version found: ${latestVersion}`)
-            
-            // Determine asset extension based on platform
-            let assetExt = ''
-            if (process.platform === 'win32') {
-                assetExt = '.exe'
-            } else if (process.platform === 'darwin') {
-                assetExt = '.dmg'
-            }
-            
-            // Find asset
-            const asset = release.assets.find((a: any) => a.name.endsWith(assetExt))
-            if (asset && asset.browser_download_url) {
-                console.log(`[Update] Found update asset: ${asset.name}`)
-                const tempPath = join(app.getPath('temp'), asset.name)
-                
-                // Show a gentle notification or log that download is starting?
-                // For now, silent background download as requested
-                console.log(`[Update] Starting download from ${asset.browser_download_url} to ${tempPath}`)
-                
-                downloadFile(asset.browser_download_url, tempPath)
-                  .then(() => {
-                    console.log('[Update] Download complete')
-                    const notification = new Notification({
-                      title: '新版本就绪',
-                      body: `新版本 ${release.tag_name} 已下载完毕，点击此处立即安装更新。`,
-                      silent: false
-                    })
-
-                    notification.on('click', () => {
-                        console.log('[Update] User clicked notification. Spawning installer and quitting...')
-                        
-                        // Kill Python process before installing update
-                        killPythonProcess()
-                        
-                        // Wait a bit for Python process to terminate
-                        setTimeout(() => {
-                            if (process.platform === 'darwin') {
-                                // macOS: Mount DMG and instruct user (simple way) or just open it
-                                // Opening DMG usually mounts it. Automating install from DMG is complex without Sparkle.
-                                // For this simple implementation, we just open the DMG file so user can drag-drop.
-                                shell.openPath(tempPath)
-                                // On macOS we might not want to quit immediately if we just open the DMG window,
-                                // but usually "updating" implies replacing the app. 
-                                // Standard behavior without auto-updater framework: Open DMG, user drags to App folder.
-                                // We can just exit to let them overwrite? 
-                                // Actually, if the app is running, they can't overwrite it easily.
-                                // Let's just open it and NOT quit automatically on Mac, 
-                                // or quit so they can drag-drop. Quitting is safer for overwrite.
-                                app.quit()
-                            } else {
-                                // Windows
-                                const subprocess = spawn(tempPath, [], {
-                                    detached: true,
-                                    stdio: 'ignore'
-                                })
-                                subprocess.unref()
-                                app.quit()
-                            }
-                        }, 500)
-                    })
-
-                    notification.show()
-                  })
-                  .catch(err => {
-                    console.error('[Update] Download failed:', err)
-                  })
-            } else {
-                console.log(`[Update] No suitable asset found for platform ${process.platform}`)
-            }
+          const assetExt = process.platform === 'win32' ? '.exe' : process.platform === 'darwin' ? '.dmg' : ''
+          const asset = release.assets?.find((a: any) => a.name.endsWith(assetExt))
+          if (!asset?.browser_download_url) {
+            console.log('[Update] No suitable asset found')
+            return
           }
+
+          pendingUpdate = {
+            version: latestVersion,
+            tagName: release.tag_name,
+            downloadUrl: asset.browser_download_url,
+            fileName: asset.name,
+            releaseNotes: (release.body || '').slice(0, 400)
+          }
+
+          // 弹出右下角更新浮窗
+          createUpdateToastWindow(pendingUpdate)
+          console.log(`[Update] Showing update toast for v${latestVersion}`)
         } catch (e) {
-          console.error('[Update] Failed to parse release info', e)
+          console.error('[Update] Parse error', e)
         }
-      }
-    })
-  })
-
-  req.on('error', (e) => {
-    console.error('[Update] Check failed', e)
-  })
-
+      })
+    }
+  )
+  req.on('error', (e) => console.error('[Update] Check failed', e))
   req.end()
 }
 
 app.whenReady().then(() => {
-  electronApp.setAppUserModelId('fin-agent')
+  electronApp.setAppUserModelId(APP_USER_MODEL_ID)
+  ensureWindowsToastShortcut()
+
+  if (!Notification.isSupported()) {
+    console.warn('[Notification] System notifications are not supported on this platform')
+  }
 
   if (!app.getLoginItemSettings().openAtLogin) {
     app.setLoginItemSettings({ openAtLogin: true })
@@ -970,7 +1151,6 @@ app.whenReady().then(() => {
   loadSeenNotifications()
 
   startPythonServer()
-  createInputWindow()
   createChatWindow()
   createTray()
 
@@ -1066,100 +1246,14 @@ app.whenReady().then(() => {
           if (ids.length > 0) {
             ids.forEach((id) => inFlightNotificationIds.add(id))
           }
-          const clearInFlight = () => {
-            ids.forEach((id) => inFlightNotificationIds.delete(id))
-          }
+          ids.forEach((id) => inFlightNotificationIds.delete(id))
 
-          let notification: Notification
-          try {
-            notification = new Notification({
-              title: notif.title || 'Fin-Agent 提醒',
-              body: notif.body || '',
-              silent: false
-            })
-          } catch (err) {
-            console.error('[Notification] Failed to construct notification:', err)
-            clearInFlight()
-            return
-          }
-          // 防止 show/failed 原生事件触发前对象被 GC，导致事件永远收不到
-          retainedNotifications.add(notification)
-          const release = () => retainedNotifications.delete(notification)
+          const title = notif.title || 'Fin-Agent 提醒'
+          const body = notif.body || ''
 
-          notification.on('click', () => {
-            // Show chat window when notification is clicked
-            if (chatWindow) {
-              if (chatWindow.isMinimized()) {
-                chatWindow.restore()
-              }
-              chatWindow.show()
-              chatWindow.focus()
-              if (notif.type === 'news' || notif.news_id || notif.merged) {
-                // 合并通知不带单条 newsId，仅按 subscriptionId 打开新闻中心并套用筛选
-                const newsId = notif.merged ? undefined : notif.news_id || undefined
-                const location = {
-                  newsId,
-                  subscriptionId: notif.subscription_id || undefined,
-                  subscriptionIds: notif.subscription_ids || [],
-                  source: notif.source,
-                  url: notif.merged ? undefined : notif.url
-                }
-                const routeParams = new URLSearchParams()
-                if (newsId) routeParams.set('newsId', newsId)
-                if (notif.subscription_id) {
-                  routeParams.set('subscriptionId', notif.subscription_id)
-                }
-                const routeQuery = routeParams.toString()
-                chatWindow.webContents.send(
-                  'navigate-route',
-                  `/news${routeQuery ? `?${routeQuery}` : ''}`
-                )
-                chatWindow.webContents.send('news-notification-open', location)
-              }
-            }
-          })
-
-          notification.on('show', () => {
-            clearInFlight()
-            if (ids.length === 0) {
-              release()
-              return
-            }
-            // 只有系统真正回调了 show，才代表通知已确认展示；先同步原子落盘，
-            // 落盘成功后才 ACK——避免“展示成功但记录/确认都没完成”时进程崩溃，
-            // 重启后既误判成已展示（漏掉重试）又没告诉后端（导致漏通知）。
-            markNotificationsSeen(ids)
-            const persisted = persistSeenNotificationsNow()
-            if (persisted) {
-              if (notif.ack_required) {
-                void ackNotifications(ids, notif.news_ids?.length ? notif.news_ids : notif.news_id)
-              }
-            } else {
-              // 内存态已标记 seen，本进程运行期间不会重复弹窗；落盘失败只记日志，
-              // 不 ACK——后端继续保留 pending，下一轮 poll 会走 isNotificationSeen
-              // 分支重试落盘 + ACK
-              console.error(
-                '[Notification] seen persist failed after show, will retry ack on next poll:',
-                ids
-              )
-            }
-            release()
-          })
-
-          notification.on('failed', (_event, error) => {
-            // 构造/展示失败：不写 seen、不 ACK，下一轮 poll 当作全新通知重试
-            clearInFlight()
-            console.error('[Notification] failed to show notification:', error)
-            release()
-          })
-
-          try {
-            notification.show()
-          } catch (err) {
-            console.error('[Notification] show() threw:', err)
-            clearInFlight()
-            release()
-          }
+          // 使用应用内浮窗通知，不依赖系统权限
+          createToastWindow({ ...notif, _title: title, _body: body })
+          confirmNotificationDelivery(ids, notif)
         })
       }
     } catch (e) {
@@ -1248,7 +1342,6 @@ app.whenReady().then(() => {
   })
 
   ipcMain.on('open-settings', () => {
-    if (inputWindow) inputWindow.hide()
     if (chatWindow) {
       chatWindow.show()
       chatWindow.focus()
@@ -1268,13 +1361,17 @@ app.whenReady().then(() => {
 
   ipcMain.on('submit-input', async (_, text, sessionId?: string) => {
     console.log('[Main] Received submit-input:', text)
+
+    const trimmed = (text || '').trim()
+    if (!trimmed) {
+      return
+    }
     
     // Check config before processing
     try {
       const configStatus = await makeApiRequest('/config/check')
       if (!configStatus || !configStatus.configured) {
         console.log('[Main] Config not configured, redirecting to config page')
-        if (inputWindow) inputWindow.hide()
         if (chatWindow) {
           chatWindow.show()
           chatWindow.focus()
@@ -1285,7 +1382,6 @@ app.whenReady().then(() => {
     } catch (err) {
       console.error('[Main] Config check failed:', err)
       // If check fails, assume not configured and redirect
-      if (inputWindow) inputWindow.hide()
       if (chatWindow) {
         chatWindow.show()
         chatWindow.focus()
@@ -1294,14 +1390,10 @@ app.whenReady().then(() => {
       return
     }
     
-    // 标记为有对话上下文
-    hasConversationContext = true
-    
-    if (inputWindow) inputWindow.hide()
     if (chatWindow) {
       chatWindow.show()
       chatWindow.focus()
-      chatWindow.webContents.send('new-message', { text, sessionId })
+      chatWindow.webContents.send('new-message', { text: trimmed, sessionId })
 
       const reqKey = streamRequestKey(sessionId)
       const tagStream = (payload: Record<string, unknown>) => {
@@ -1313,7 +1405,7 @@ app.whenReady().then(() => {
       try {
         console.log('[Main] Sending POST to http://127.0.0.1:5678/chat')
 
-        const postData = JSON.stringify({ message: text, session_id: sessionId })
+        const postData = JSON.stringify({ message: trimmed, session_id: sessionId })
         console.log('[Main] POST data:', postData)
         console.log('[Main] POST data length:', Buffer.byteLength(postData))
 
@@ -1516,15 +1608,50 @@ app.whenReady().then(() => {
     }
   })
 
-  ipcMain.on('resize-input', (_, height) => {
-      if(inputWindow) {
-          const [width] = inputWindow.getSize()
-          inputWindow.setSize(width, height)
-      }
-  })
-
   ipcMain.handle('get-version', () => {
     return getVersion()
+  })
+
+  // ── 应用内更新 IPC ─────────────────────────────────────────────────────────
+  ipcMain.handle('get-pending-update', () => pendingUpdate)
+
+  ipcMain.handle('start-update-download', async () => {
+    if (!pendingUpdate) return { error: '没有待更新版本' }
+    if (updateDownloading) return { error: '已在下载中' }
+    updateDownloading = true
+    updateDownloadPath = join(app.getPath('temp'), pendingUpdate.fileName)
+    try {
+      await downloadFileWithProgress(
+        pendingUpdate.downloadUrl,
+        updateDownloadPath,
+        (percent, received, total) => {
+          sendUpdateToastEvent('update-download-progress', { percent, received, total })
+        }
+      )
+      updateDownloading = false
+      sendUpdateToastEvent('update-download-done')
+      return { success: true }
+    } catch (err: any) {
+      updateDownloading = false
+      sendUpdateToastEvent('update-download-error', String(err?.message ?? err))
+      return { error: String(err?.message ?? err) }
+    }
+  })
+
+  ipcMain.handle('install-update', () => {
+    if (!updateDownloadPath) return { error: '安装包不存在' }
+    killPythonProcess()
+    setTimeout(() => {
+      if (process.platform === 'darwin') {
+        shell.openPath(updateDownloadPath)
+        app.quit()
+      } else {
+        const sub = spawn(updateDownloadPath, [], { detached: true, stdio: 'ignore' })
+        sub.unref()
+        app.quit()
+      }
+    }, 500)
+    return { success: true }
   })
 
   ipcMain.handle('set-title-bar-theme', (_e, theme: 'dark' | 'light') => {
@@ -1710,15 +1837,13 @@ app.whenReady().then(() => {
     return app.getLoginItemSettings().openAtLogin
   })
 
-  // 重置对话上下文（清空对话时调用）
+  // 重置对话上下文（保留 IPC 兼容，快捷键逻辑已不再依赖此标志）
   ipcMain.on('reset-conversation-context', () => {
-    console.log('[Main] Resetting conversation context')
-    hasConversationContext = false
+    console.log('[Main] reset-conversation-context (no-op)')
   })
 
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) {
-      createInputWindow()
       createChatWindow()
     }
   })
@@ -1842,15 +1967,11 @@ app.on('before-quit', async (event) => {
     // 阻止默认退出行为
     event.preventDefault()
     
-    // 优先显示聊天窗口，隐藏输入窗口
+    // 优先显示聊天窗口
     if (chatWindow) {
       if (!chatWindow.isVisible()) {
         chatWindow.show()
         chatWindow.focus()
-      }
-      // 隐藏输入窗口（如果可见）
-      if (inputWindow && inputWindow.isVisible()) {
-        inputWindow.hide()
       }
       
       // 最后一次检查，确保请求还在进行

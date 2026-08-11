@@ -67,9 +67,9 @@ const ToolExecutionView: React.FC<{ block: ToolExecutionBlock }> = ({ block }) =
             <Terminal size={14} className="text-[var(--fa-danger)]" />
           )}
         </div>
-        <div className="flex flex-1 items-center gap-2 truncate font-mono text-xs text-[var(--fa-muted)]">
+        <div className="flex flex-1 items-center gap-2 truncate font-mono text-xs text-[var(--fa-text)]">
           <span className="font-semibold text-[var(--fa-accent)]">执行 {block.name}</span>
-          <span className="truncate opacity-60">{block.args.substring(0, 50)}</span>
+          <span className="truncate text-[var(--fa-muted)]">{block.args.substring(0, 50)}</span>
         </div>
         <div className="text-[var(--fa-faint)]">
           {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
@@ -151,7 +151,7 @@ const markdownComponents = {
   td: ({ children, ...props }: any) => (
     <td
       {...props}
-      className="border-b border-[var(--fa-border-subtle)] px-4 py-2.5 text-sm font-normal leading-7 text-[var(--fa-muted)] whitespace-nowrap"
+      className="border-b border-[var(--fa-border-subtle)] px-4 py-2.5 text-sm font-normal leading-7 text-[var(--fa-text)] whitespace-nowrap"
     >
       {children}
     </td>
@@ -285,10 +285,14 @@ const ChatView: React.FC = () => {
     const removeNewsListener = window.api.onNewsNotificationOpen(() => {
       void loadNewsUnread()
     })
+    const removePriceAlertListener = window.api.onPriceAlertNotificationOpen(() => {
+      setReminderModalOpen(true)
+    })
     return () => {
       cancelled = true
       window.clearInterval(intervalId)
       removeNewsListener()
+      removePriceAlertListener()
     }
   }, [])
 
@@ -740,7 +744,10 @@ const ChatView: React.FC = () => {
 
 
   return (
-    <div className="relative flex h-screen bg-[var(--fa-sidebar)] text-[var(--fa-text)]">
+    <div className="fa-app-shell">
+      <div className="fa-app-shell-bg" aria-hidden />
+      {/* 整窗一层连续玻璃：侧栏 + 顶栏无接缝 */}
+      <div className="fa-chrome-glass" aria-hidden />
       <SessionTabs onOpenDrawer={() => setDrawerOpen(true)} />
 
       <div className="fa-shell-main">
@@ -851,7 +858,7 @@ const ChatView: React.FC = () => {
                 <div
                   className={
                     msg.role === 'user'
-                      ? 'max-w-[min(90%,32rem)] rounded-2xl bg-[var(--fa-user-bubble)] px-4 py-2.5 text-[15px] leading-relaxed text-[var(--fa-text)]'
+                      ? 'fa-user-bubble max-w-[min(90%,32rem)] rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed text-[var(--fa-text)]'
                       : 'w-full min-w-0 max-w-full py-0.5 text-[15px] leading-relaxed text-[var(--fa-text)]'
                   }
                 >
@@ -888,10 +895,12 @@ const ChatView: React.FC = () => {
                                 candidate.type === 'text' ? candidateIndex : lastIndex,
                               -1
                             ) ?? -1
+                          const lastBlockIndex = (msg.blocks?.length ?? 0) - 1
                           const isLiveTail =
                             isResponding &&
-                            idx === messages.length - 1 &&
-                            bIdx === lastTextBlockIndex
+                            idx === displayMessages.length - 1 &&
+                            bIdx === lastTextBlockIndex &&
+                            bIdx === lastBlockIndex
                           return (
                             <div
                               key={bIdx}
@@ -965,7 +974,7 @@ const ChatView: React.FC = () => {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={isResponding ? 'Fin-Agent 正在回复…' : '随心输入'}
+                placeholder={isResponding ? 'Fin-Agent 正在回复…' : '输入投资问题，如个股分析、行情查询…'}
                 autoFocus
                 className="w-full bg-transparent px-5 pt-4 pb-2 text-[15px] text-[var(--fa-text)] outline-none placeholder:text-[var(--fa-faint)]"
                 aria-label="消息输入"

@@ -303,6 +303,7 @@ def init_agent():
         # Start backend scheduler
         try:
             scheduler = TaskScheduler()
+            scheduler.set_notification_sink(enqueue_notification)
             scheduler.start()
             debug_print("Background scheduler started.")
             print("Background scheduler started.")
@@ -440,6 +441,7 @@ def handle_get_config(req):
         "alert_poll_interval_minutes": Config.ALERT_POLL_INTERVAL_MINUTES,
         "alert_trading_hours_only": Config.ALERT_TRADING_HOURS_ONLY,
         "news_poll_interval_minutes": Config.NEWS_POLL_INTERVAL_MINUTES,
+        "news_sentiment_enabled": Config.NEWS_SENTIMENT_ENABLED,
     }
 
 
@@ -537,8 +539,17 @@ def handle_config_save(req):
         data.get('data_source', 'akshare'),
         data.get('alert_poll_interval_minutes', 10),
         data.get('alert_trading_hours_only', True),
-        data.get('news_poll_interval_minutes')
+        data.get('news_poll_interval_minutes'),
+        data.get('news_sentiment_enabled'),
     )
+
+    if Config.NEWS_SENTIMENT_ENABLED:
+        try:
+            from fin_agent.news_sentiment import get_sentiment_labeler
+            get_sentiment_labeler().enqueue_backlog(_news_history_store(), limit=30)
+        except Exception as exc:
+            sys.stderr.write(f"[Config] sentiment backlog enqueue failed: {exc}\n")
+            sys.stderr.flush()
 
     from fin_agent.datasources import reset_provider_cache
     reset_provider_cache()

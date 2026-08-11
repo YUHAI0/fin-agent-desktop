@@ -12,6 +12,18 @@ export const NEWS_TYPE_LABELS: Record<NewsSubscriptionType, string> = {
   portfolio: '组合'
 }
 
+export const NEWS_SENTIMENT_LABELS: Record<NewsSentiment, string> = {
+  bullish: '利好',
+  bearish: '利空',
+  neutral: '中性'
+}
+
+export function sentimentBadgeClass(sentiment: NewsSentiment): string {
+  if (sentiment === 'bullish') return 'fa-news-sentiment-bullish'
+  if (sentiment === 'bearish') return 'fa-news-sentiment-bearish'
+  return 'fa-news-sentiment-neutral'
+}
+
 /** sector / topic 订阅只允许全局资讯源，避免误配需要个股上下文的 stock_news_em */
 export const SECTOR_TOPIC_SOURCES: NewsSource[] = ['stock_info_global_cls', 'stock_info_global_em']
 

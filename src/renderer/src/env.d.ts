@@ -18,6 +18,7 @@ interface ConfigData {
     alert_poll_interval_minutes?: number
     alert_trading_hours_only?: boolean
     news_poll_interval_minutes?: 5 | 10 | 15 | 30
+    news_sentiment_enabled?: boolean
 }
 
 interface SessionMeta {
@@ -104,6 +105,8 @@ interface NewsSubscriptionInput {
 
 type NewsSubscriptionUpdate = Partial<Omit<NewsSubscriptionInput, 'type'>>
 
+type NewsSentiment = 'bullish' | 'bearish' | 'neutral'
+
 interface NotifiedNewsItem {
   id: string
   source: NewsSource
@@ -125,6 +128,8 @@ interface NotifiedNewsItem {
   related_sources: NewsSource[]
   source_alias_ids: string[]
   updated_at: string
+  sentiment?: NewsSentiment | null
+  sentiment_labeled_at?: string | null
 }
 
 interface NewsListFilters {
@@ -176,6 +181,11 @@ interface NewsNotificationOpenPayload {
   subscriptionIds: string[]
   source?: NewsSource
   url?: string
+}
+
+interface PriceAlertNotificationOpenPayload {
+  taskId?: string
+  tsCode?: string
 }
 
 declare interface Window {
@@ -248,6 +258,9 @@ declare interface Window {
     onNewsNotificationOpen: (
       callback: (payload: NewsNotificationOpenPayload) => void
     ) => () => void
+    onPriceAlertNotificationOpen: (
+      callback: (payload: PriceAlertNotificationOpenPayload) => void
+    ) => () => void
     listSessions: (offset: number, limit: number) => Promise<{ sessions: SessionMeta[]; total: number }>
     getSession: (id: string) => Promise<SessionBody>
     createSession: (title?: string) => Promise<SessionMeta>
@@ -266,5 +279,34 @@ declare interface Window {
     deletePosition: (id: string | undefined, tsCode: string) => Promise<{ success: boolean; error?: string }>
     setTitleBarTheme: (theme: 'dark' | 'light') => Promise<void>
     platform: string
+    getPendingUpdate: () => Promise<UpdateInfo | null>
+    startUpdateDownload: () => Promise<{ success?: boolean; error?: string }>
+    installUpdate: () => Promise<{ success?: boolean; error?: string }>
+    updateToastDismiss: () => void
+    onUpdateAvailable: (cb: (info: UpdateInfo) => void) => () => void
+    onUpdateDownloadProgress: (cb: (p: { percent: number; received: number; total: number }) => void) => () => void
+    onUpdateDownloadDone: (cb: () => void) => () => void
+    onUpdateDownloadError: (cb: (err: string) => void) => () => void
+    onInAppNotification: (
+      cb: (payload: InAppNotificationPayload) => void
+    ) => () => void
   }
+}
+
+interface InAppNotificationPayload {
+  title: string
+  body: string
+  type?: string
+  newsId?: string | null
+  subscriptionId?: string | null
+  taskId?: string
+  tsCode?: string
+}
+
+interface UpdateInfo {
+  version: string
+  tagName: string
+  downloadUrl: string
+  fileName: string
+  releaseNotes: string
 }

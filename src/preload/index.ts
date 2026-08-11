@@ -36,6 +36,59 @@ const onNewsNotificationOpenBridge = createChannelBridge<{
   source?: string
   url?: string
 }>('news-notification-open')
+const onPriceAlertNotificationOpenBridge = createChannelBridge<{
+  taskId?: string
+  tsCode?: string
+}>('price-alert-notification-open')
+
+interface UpdateInfo {
+  version: string
+  tagName: string
+  downloadUrl: string
+  fileName: string
+  releaseNotes: string
+}
+const onUpdateAvailableBridge = createChannelBridge<UpdateInfo>('update-available')
+const onUpdateDownloadProgressBridge = createChannelBridge<{ percent: number; received: number; total: number }>('update-download-progress')
+const onUpdateDownloadDoneBridge = createChannelBridge<void>('update-download-done')
+const onUpdateDownloadErrorBridge = createChannelBridge<string>('update-download-error')
+
+// Toast 浮窗事件（仅在 /toast 路由窗口使用）
+type ToastBusListener = (data: any) => void
+const toastBusListeners = new Map<string, Set<ToastBusListener>>()
+const ELECTRON_BUS_CHANNELS = [
+  'toast-show',
+  'toast-dismiss',
+  'update-show',
+  'update-dismiss',
+  'update-download-progress',
+  'update-download-done',
+  'update-download-error'
+] as const
+for (const ch of ELECTRON_BUS_CHANNELS) {
+  ipcRenderer.removeAllListeners(ch)
+  ipcRenderer.on(ch, (_event, data) => {
+    const listeners = toastBusListeners.get(ch)
+    if (listeners) for (const cb of listeners) cb(data)
+  })
+}
+const electronBus = {
+  on(channel: string, cb: ToastBusListener): () => void {
+    if (!toastBusListeners.has(channel)) toastBusListeners.set(channel, new Set())
+    toastBusListeners.get(channel)!.add(cb)
+    return () => toastBusListeners.get(channel)?.delete(cb)
+  }
+}
+
+const onInAppNotificationBridge = createChannelBridge<{
+  title: string
+  body: string
+  type?: string
+  newsId?: string | null
+  subscriptionId?: string | null
+  taskId?: string
+  tsCode?: string
+}>('in-app-notification')
 
 type PositionPayload = {
   id?: string
@@ -123,6 +176,9 @@ const api = {
       url?: string
     }) => void
   ) => onNewsNotificationOpenBridge(callback),
+  onPriceAlertNotificationOpen: (
+    callback: (payload: { taskId?: string; tsCode?: string }) => void
+  ) => onPriceAlertNotificationOpenBridge(callback),
   listSessions: (offset: number, limit: number) => ipcRenderer.invoke('list-sessions', offset, limit),
   getSession: (id: string) => ipcRenderer.invoke('get-session', id),
   createSession: (title?: string) => ipcRenderer.invoke('create-session', title),
@@ -140,13 +196,35 @@ const api = {
   updatePosition: (payload: PositionPayload) => ipcRenderer.invoke('update-position', payload),
   deletePosition: (id: string | undefined, tsCode: string) => ipcRenderer.invoke('delete-position', id, tsCode),
   setTitleBarTheme: (theme: 'dark' | 'light') => ipcRenderer.invoke('set-title-bar-theme', theme),
-  platform: process.platform
+  platform: process.platform,
+  getPendingUpdate: () => ipcRenderer.invoke('get-pending-update'),
+  startUpdateDownload: () => ipcRenderer.invoke('start-update-download'),
+  installUpdate: () => ipcRenderer.invoke('install-update'),
+  updateToastDismiss: () => ipcRenderer.send('update-toast-dismiss'),
+  onUpdateAvailable: (cb: (info: UpdateInfo) => void) => onUpdateAvailableBridge(cb),
+  onUpdateDownloadProgress: (cb: (p: { percent: number; received: number; total: number }) => void) => onUpdateDownloadProgressBridge(cb),
+  onUpdateDownloadDone: (cb: () => void) => onUpdateDownloadDoneBridge(cb),
+  onUpdateDownloadError: (cb: (err: string) => void) => onUpdateDownloadErrorBridge(cb),
+  toastClick: () => ipcRenderer.send('toast-click'),
+  toastClose: () => ipcRenderer.send('toast-close'),
+  onInAppNotification: (
+    cb: (payload: {
+      title: string
+      body: string
+      type?: string
+      newsId?: string | null
+      subscriptionId?: string | null
+      taskId?: string
+      tsCode?: string
+    }) => void
+  ) => onInAppNotificationBridge(cb)
 }
 
 if (process.contextIsolated) {
   try {
     contextBridge.exposeInMainWorld('electron', electronAPI)
     contextBridge.exposeInMainWorld('api', api)
+    contextBridge.exposeInMainWorld('electronBus', electronBus)
   } catch (error) {
     console.error(error)
   }
@@ -155,5 +233,7 @@ if (process.contextIsolated) {
   window.electron = electronAPI
   // @ts-ignore (define in dts)
   window.api = api
+  // @ts-ignore (define in dts)
+  window.electronBus = electronBus
 }
 

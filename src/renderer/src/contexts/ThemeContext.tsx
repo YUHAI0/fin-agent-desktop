@@ -44,6 +44,17 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [theme])
 
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== THEME_KEY) return
+      if (event.newValue !== 'light' && event.newValue !== 'dark') return
+      applyTheme(event.newValue)
+      setThemeState(event.newValue)
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [])
+
   const setTheme = useCallback((next: ThemeMode) => {
     applyTheme(next)
     setThemeState(next)

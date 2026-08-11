@@ -1,5 +1,5 @@
 import React from 'react'
-import { History, MessageSquarePlus, X } from 'lucide-react'
+import { ChevronDown, History, MessageSquarePlus, X } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
 
 interface SessionTabsProps {
@@ -10,17 +10,18 @@ const SessionTabs: React.FC<SessionTabsProps> = ({ onOpenDrawer }) => {
   const { openTabs, activeSessionId, openSession, closeTab, newSession } = useChat()
 
   return (
-    <aside className="flex h-full w-[260px] shrink-0 flex-col bg-[var(--fa-sidebar)]">
+    <aside className="fa-sidebar-glass flex h-full shrink-0 flex-col">
       <div className="fa-sidebar-brand fa-titlebar-row fa-titlebar-row--reserve-start">
-        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--fa-surface)] text-[11px] font-semibold tracking-tight text-[var(--fa-text)]">
-          FA
+        <div className="fa-sidebar-brand-pill min-w-0">
+          <span className="fa-sidebar-brand-pill-icon" aria-hidden>
+            FA
+          </span>
+          <span className="truncate">Fin-Agent</span>
+          <ChevronDown size={13} className="shrink-0 opacity-50" aria-hidden />
         </div>
-        <span className="truncate text-sm font-medium tracking-tight text-[var(--fa-text)]">
-          Fin-Agent
-        </span>
       </div>
 
-      <nav className="space-y-0.5 px-3 pb-2 pt-2" aria-label="主导航">
+      <nav className="space-y-0.5 px-3 pb-2 pt-1" aria-label="主导航">
         <button
           type="button"
           onClick={() => void newSession()}
@@ -35,11 +36,9 @@ const SessionTabs: React.FC<SessionTabsProps> = ({ onOpenDrawer }) => {
         </button>
       </nav>
 
-      <div className="mx-4 h-px bg-[var(--fa-border-subtle)]" />
+      <div className="fa-sidebar-divider" />
 
-      <div className="px-4 pt-4 pb-2 text-[11px] font-medium tracking-wide text-[var(--fa-faint)]">
-        会话
-      </div>
+      <div className="fa-sidebar-section-label">会话</div>
 
       <div className="flex-1 overflow-y-auto px-3 pb-4">
         {openTabs.length === 0 && (
