@@ -140,6 +140,39 @@ def enqueue_notification(payload):
             _drop_oldest_notifications_if_over_capacity()
         return True
 
+    def _sentiment_of(item):
+        value = (item or {}).get("sentiment")
+        if value in ("bullish", "bearish", "neutral"):
+            return value
+        return None
+
+    def _sentiment_counts(entries):
+        counts = {"bullish": 0, "bearish": 0, "neutral": 0, "unknown": 0}
+        for entry in entries:
+            key = _sentiment_of(entry.get("item")) or "unknown"
+            counts[key] = counts.get(key, 0) + 1
+        return counts
+
+    def _single_body(item):
+        title = (item.get("title") or "").strip()
+        summary = (item.get("summary") or "").strip()
+        if title and summary and summary != title:
+            # 标题 + 摘要，供大号 Toast 多行展示
+            return f"{title}\n{summary[:180]}"
+        return title or summary or "有新的订阅新闻"
+
+    def _merged_body(entries, counts):
+        parts = []
+        label_map = {"bullish": "利好", "bearish": "利空", "neutral": "中性"}
+        for entry in entries[:6]:
+            item = entry.get("item") or {}
+            title = (item.get("title") or item.get("summary") or "未命名新闻").strip()
+            tag = label_map.get(_sentiment_of(item) or "", "")
+            parts.append(f"[{tag}] {title}" if tag else title)
+        if len(entries) > 6:
+            parts.append(f"…另有 {len(entries) - 6} 条")
+        return "\n".join(parts)
+
     # 先按 news_id 去重，保留全部命中订阅；主订阅 = 首次出现的订阅。
     by_news_id = {}
     for group in payload.get("groups") or []:
@@ -197,16 +230,25 @@ def enqueue_notification(payload):
                 news_id = entry["news_id"]
                 item = entry["item"]
                 subscription_ids = entry["subscription_ids"]
+                sentiment = _sentiment_of(item)
                 notification_queue.append({
                     "notification_id": f"news:{news_id}",
                     "notification_ids": [f"news:{news_id}"],
                     "type": "news",
                     "title": subscription_name,
-                    "body": item.get("title") or item.get("summary") or "有新的订阅新闻",
+                    "body": _single_body(item),
                     "timestamp": now,
                     "news_id": news_id,
                     "news_ids": [news_id],
                     "merged": False,
+                    "news_count": 1,
+                    "sentiment": sentiment,
+                    "sentiment_counts": {
+                        "bullish": 1 if sentiment == "bullish" else 0,
+                        "bearish": 1 if sentiment == "bearish" else 0,
+                        "neutral": 1 if sentiment == "neutral" else 0,
+                        "unknown": 0 if sentiment else 1,
+                    },
                     "subscription_id": subscription_id,
                     "subscription_ids": subscription_ids,
                     "source": item.get("source"),
@@ -219,27 +261,36 @@ def enqueue_notification(payload):
             news_ids = [entry["news_id"] for entry in fresh_entries]
             notification_ids = [f"news:{news_id}" for news_id in news_ids]
             first_item = fresh_entries[0]["item"]
-            first_title = (
-                first_item.get("title")
-                or first_item.get("summary")
-                or "有新的订阅新闻"
-            )
+            counts = _sentiment_counts(fresh_entries)
             all_subscription_ids = []
             for entry in fresh_entries:
                 for sid in entry["subscription_ids"]:
                     if sid not in all_subscription_ids:
                         all_subscription_ids.append(sid)
             merge_token = subscription_id or news_ids[0]
+            bullish = counts.get("bullish", 0)
+            bearish = counts.get("bearish", 0)
+            count_bits = []
+            if bullish:
+                count_bits.append(f"利好{bullish}")
+            if bearish:
+                count_bits.append(f"利空{bearish}")
+            merge_title = f"{subscription_name} · 新增 {len(fresh_entries)} 条"
+            if count_bits:
+                merge_title = f"{merge_title}（{'/'.join(count_bits)}）"
             notification_queue.append({
                 "notification_id": f"news-merge:{merge_token}:{int(now * 1000)}",
                 "notification_ids": notification_ids,
                 "type": "news",
-                "title": subscription_name,
-                "body": f"新增 {len(fresh_entries)} 条新闻：{first_title}",
+                "title": merge_title,
+                "body": _merged_body(fresh_entries, counts),
                 "timestamp": now,
                 "news_id": None,
                 "news_ids": news_ids,
                 "merged": True,
+                "news_count": len(fresh_entries),
+                "sentiment": None,
+                "sentiment_counts": counts,
                 "subscription_id": subscription_id,
                 "subscription_ids": all_subscription_ids or (
                     [subscription_id] if subscription_id else []
@@ -476,6 +527,40 @@ def handle_notifications_ack(req):
         "acknowledged": sorted(resolved_news_ids),
         "changed": changed,
     }
+
+
+@route("POST", "/notifications/test")
+def handle_notifications_test(req):
+    """手动入队一条测试桌面通知，便于验证浮窗显示与点击跳转。"""
+    body = req.body or {}
+    now = time.time()
+    nid = body.get("notification_id") or f"test_toast_{int(now * 1000)}"
+    ntype = body.get("type") or "price_alert"
+    payload = {
+        "notification_id": nid,
+        "notification_ids": body.get("notification_ids") or [nid],
+        "type": ntype,
+        "title": body.get("title") or "测试桌面通知",
+        "body": body.get("body") or "如果你能看到这条，飞书式浮窗已生效",
+        "timestamp": now,
+        "task_id": body.get("task_id"),
+        "ts_code": body.get("ts_code"),
+        "news_id": body.get("news_id"),
+        "news_ids": body.get("news_ids"),
+        "subscription_id": body.get("subscription_id"),
+        "subscription_ids": body.get("subscription_ids"),
+        "source": body.get("source"),
+        "url": body.get("url"),
+        "merged": bool(body.get("merged")),
+        "news_count": body.get("news_count"),
+        "sentiment": body.get("sentiment"),
+        "sentiment_counts": body.get("sentiment_counts"),
+        "ack_required": bool(body.get("ack_required")),
+        # 仅测试用：让 Electron 弹出更新浮窗
+        "update": body.get("update"),
+    }
+    enqueue_notification(payload)
+    return {"success": True, "notification_id": nid, "type": ntype}
 
 
 @route("GET", "/config/check")
@@ -930,6 +1015,53 @@ def handle_position_delete(req):
         )
     except ValueError as e:
         raise ApiError(404, str(e))
+
+
+# --- 股票详情页市场读接口（结构化 JSON，不走 Agent 工具） ---
+
+@route("GET", "/market/search")
+def handle_market_search(req):
+    from fin_agent import api_market
+    Config.load()
+    return api_market.search_stocks(req.query.get("q") or "")
+
+
+@route("GET", "/market/quote")
+def handle_market_quote(req):
+    from fin_agent import api_market
+    Config.load()
+    return api_market.get_quote(req.query.get("ts_code") or "")
+
+
+@route("GET", "/market/kline")
+def handle_market_kline(req):
+    from fin_agent import api_market
+    Config.load()
+    return api_market.get_kline(
+        req.query.get("ts_code") or "",
+        period=req.query.get("period") or "6M",
+    )
+
+
+@route("GET", "/market/valuation")
+def handle_market_valuation(req):
+    from fin_agent import api_market
+    Config.load()
+    return api_market.get_valuation(req.query.get("ts_code") or "")
+
+
+@route("GET", "/market/financials")
+def handle_market_financials(req):
+    from fin_agent import api_market
+    Config.load()
+    return api_market.get_financials(req.query.get("ts_code") or "")
+
+
+@route("GET", "/market/moneyflow")
+def handle_market_moneyflow(req):
+    from fin_agent import api_market
+    Config.load()
+    return api_market.get_moneyflow(req.query.get("ts_code") or "")
 
 
 class RequestHandler(BaseHTTPRequestHandler):

@@ -9,8 +9,6 @@ import React, {
 } from 'react'
 import { AlertTriangle, Info, X } from 'lucide-react'
 
-type DialogKind = 'confirm' | 'alert' | 'prompt'
-
 interface DialogBase {
   title: string
   message?: string

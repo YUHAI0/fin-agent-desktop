@@ -189,7 +189,19 @@ const PortfolioView: React.FC = () => {
         )}
         {!loading &&
           detail?.positions.map((position) => (
-            <div key={position.ts_code} className="fa-card flex items-center gap-3 px-3 py-2.5">
+            <div
+              key={position.ts_code}
+              role="link"
+              tabIndex={0}
+              className="fa-card flex cursor-pointer items-center gap-3 px-3 py-2.5 transition-colors hover:bg-[var(--fa-surface-hover)]"
+              onClick={() => navigate(`/stock/${encodeURIComponent(position.ts_code)}`)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  navigate(`/stock/${encodeURIComponent(position.ts_code)}`)
+                }
+              }}
+            >
               <div className="w-24 shrink-0">
                 <div className="truncate text-sm font-medium">{position.name}</div>
                 <div className="font-mono text-[11px] text-[var(--fa-faint)]">{position.ts_code}</div>
@@ -224,7 +236,8 @@ const PortfolioView: React.FC = () => {
               <div className="flex shrink-0 gap-0.5">
                 <button
                   type="button"
-                  onClick={() => {
+                  onClick={(e) => {
+                    e.stopPropagation()
                     setModalMode('edit')
                     setEditing(position)
                     setModalOpen(true)
@@ -237,7 +250,10 @@ const PortfolioView: React.FC = () => {
                 </button>
                 <button
                   type="button"
-                  onClick={() => void handleDeletePosition(position)}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    void handleDeletePosition(position)
+                  }}
                   title="删除"
                   aria-label="删除持仓"
                   className="cursor-pointer rounded-lg p-1.5 text-[var(--fa-muted)] transition-colors hover:bg-[var(--fa-surface-hover)] hover:text-[var(--fa-danger)]"

@@ -1,4 +1,0 @@
-[submodule "python/fin-agent"]
-	path = python/fin-agent
-	url = git@github.com:YUHAI0/fin-agent.git
-	branch = master 

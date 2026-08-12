@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, Loader2, RefreshCw } from 'lucide-react'
 import donateWechat from '../assets/donate-wechat.png'
 import SubPageShell from './SubPageShell'
 
@@ -13,12 +13,43 @@ const SHOW_GITHUB_SPONSORS = false
 const AboutView: React.FC = () => {
   const navigate = useNavigate()
   const [version, setVersion] = useState('')
+  const [checking, setChecking] = useState(false)
+  const [checkMsg, setCheckMsg] = useState<string | null>(null)
+  const [checkTone, setCheckTone] = useState<'muted' | 'ok' | 'err'>('muted')
 
   useEffect(() => {
     void window.api.getVersion().then(setVersion)
   }, [])
 
   const open = (url: string) => () => void window.api.openExternal(url)
+
+  const handleCheckUpdate = async () => {
+    if (checking) return
+    setChecking(true)
+    setCheckMsg('正在检查更新…')
+    setCheckTone('muted')
+    try {
+      const res = await window.api.checkForUpdates()
+      if (res.status === 'available') {
+        setCheckMsg(`发现新版本 v${res.version}，已打开更新窗口`)
+        setCheckTone('ok')
+      } else if (res.status === 'uptodate') {
+        setCheckMsg(`已是最新版本（v${res.currentVersion}）`)
+        setCheckTone('ok')
+      } else if (res.status === 'no_asset') {
+        setCheckMsg(`远端有 v${res.version}，但未找到当前平台的安装包`)
+        setCheckTone('err')
+      } else {
+        setCheckMsg(res.error || '检查失败')
+        setCheckTone('err')
+      }
+    } catch (e) {
+      setCheckMsg(e instanceof Error ? e.message : String(e))
+      setCheckTone('err')
+    } finally {
+      setChecking(false)
+    }
+  }
 
   return (
     <SubPageShell>
@@ -47,6 +78,30 @@ const AboutView: React.FC = () => {
             一个跑在本地的 AI 金融助手：用自然语言查行情、读财报、管持仓、设价格提醒，
             数据与配置全部保存在你自己的电脑上。
           </p>
+          <div className="mt-5 flex flex-col items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void handleCheckUpdate()}
+              disabled={checking}
+              className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-[var(--fa-border)] bg-[var(--fa-surface)] px-4 py-2 text-sm font-medium transition-colors hover:bg-[var(--fa-surface-hover)] disabled:cursor-wait disabled:opacity-60"
+            >
+              {checking ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
+              {checking ? '检查中…' : '检查并更新'}
+            </button>
+            {checkMsg && (
+              <p
+                className={`text-xs ${
+                  checkTone === 'ok'
+                    ? 'text-emerald-400'
+                    : checkTone === 'err'
+                      ? 'text-red-400'
+                      : 'text-[var(--fa-faint)]'
+                }`}
+              >
+                {checkMsg}
+              </p>
+            )}
+          </div>
         </div>
 
         <div className="mt-8 space-y-3">

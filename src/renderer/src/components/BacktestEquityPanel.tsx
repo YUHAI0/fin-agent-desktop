@@ -34,7 +34,7 @@ function buildChartOptions(colors: ReturnType<typeof readChartTheme>, width: num
     timeScale: {
       borderColor: colors.border,
       tickMarkFormatter: (time: unknown, tickMarkType: unknown) =>
-        formatTickMarkZh(time, tickMarkType as Parameters<typeof formatTickMarkZh>[1])
+        formatTickMarkZh(time as import('lightweight-charts').Time, tickMarkType as Parameters<typeof formatTickMarkZh>[1])
     }
   }
 }

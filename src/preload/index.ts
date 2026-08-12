@@ -123,7 +123,9 @@ const api = {
       }
     }
   },
-  onNewMessage: (callback: (text: string) => void) => onNewMessageBridge(callback),
+  onNewMessage: (
+    callback: (payload: { text: string; sessionId?: string } | string) => void
+  ) => onNewMessageBridge(callback),
   onNavigate: (callback: (route: string) => void) => onNavigateBridge(callback),
   onBotResponse: (callback: (data: any) => void) => onBotResponseBridge(callback),
   onBotStream: (callback: (data: any) => void) => onBotStreamBridge(callback),
@@ -195,9 +197,21 @@ const api = {
   addPosition: (payload: PositionPayload) => ipcRenderer.invoke('add-position', payload),
   updatePosition: (payload: PositionPayload) => ipcRenderer.invoke('update-position', payload),
   deletePosition: (id: string | undefined, tsCode: string) => ipcRenderer.invoke('delete-position', id, tsCode),
+  searchStocks: (q: string) => ipcRenderer.invoke('search-stocks', q),
+  getStockQuote: (tsCode: string) => ipcRenderer.invoke('get-stock-quote', tsCode),
+  getStockKline: (tsCode: string, period?: string) =>
+    ipcRenderer.invoke('get-stock-kline', tsCode, period),
+  getStockValuation: (tsCode: string) => ipcRenderer.invoke('get-stock-valuation', tsCode),
+  getStockFinancials: (tsCode: string) => ipcRenderer.invoke('get-stock-financials', tsCode),
+  getStockMoneyflow: (tsCode: string) => ipcRenderer.invoke('get-stock-moneyflow', tsCode),
   setTitleBarTheme: (theme: 'dark' | 'light') => ipcRenderer.invoke('set-title-bar-theme', theme),
   platform: process.platform,
   getPendingUpdate: () => ipcRenderer.invoke('get-pending-update'),
+  checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
+  resizeUpdateToast: (height: number) => ipcRenderer.invoke('resize-update-toast', height),
+  updateToastReady: () => ipcRenderer.send('update-toast-ready'),
+  resizeToast: (height: number) => ipcRenderer.invoke('resize-toast', height),
+  setToastChrome: (theme?: string) => ipcRenderer.invoke('set-toast-chrome', theme),
   startUpdateDownload: () => ipcRenderer.invoke('start-update-download'),
   installUpdate: () => ipcRenderer.invoke('install-update'),
   updateToastDismiss: () => ipcRenderer.send('update-toast-dismiss'),
@@ -207,6 +221,19 @@ const api = {
   onUpdateDownloadError: (cb: (err: string) => void) => onUpdateDownloadErrorBridge(cb),
   toastClick: () => ipcRenderer.send('toast-click'),
   toastClose: () => ipcRenderer.send('toast-close'),
+  toastShown: () => ipcRenderer.send('toast-shown'),
+  debugShowToast: () => ipcRenderer.invoke('debug-show-toast'),
+  getPendingToast: () =>
+    ipcRenderer.invoke('get-pending-toast') as Promise<{
+      _title: string
+      _body: string
+      type?: string
+      news_id?: string | null
+      subscription_id?: string | null
+      task_id?: string
+      ts_code?: string
+      _winId?: number
+    } | null>,
   onInAppNotification: (
     cb: (payload: {
       title: string

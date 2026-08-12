@@ -11,7 +11,7 @@ export interface QuickReplyOption {
 /** 点击「功能总览」时发给大模型的固定追问（期望回答能力说明 + 末尾 FIN_AGENT_CHOICES_JSON 示例问句） */
 export const FEATURE_OVERVIEW_USER_PROMPT =
   '请系统说明你能帮我做哪些事：至少覆盖行情与K线、财务与估值、技术与选股、模拟持仓与盈亏、价格邮件提醒、策略回测与收益曲线等，并说明依赖条件（如 Tushare Token、大模型与邮件设置）。\n\n' +
-  '回复完成后，在全文最后一行严格追加 FIN_AGENT_CHOICES_JSON：JSON 数组含 6～8 个对象；每条 send 为一句完整、可直接当作用户消息发送的中文问句，label 用简短按钮文案；场景尽量全面、互不重复。'
+  '回复完成后，在全文最后一行严格追加 FIN_AGENT_CHOICES_JSON：JSON 数组含 6～8 个对象；每条 label 与 send 均为同一句简短中文意图（如「MACD回测」「设置价格提醒」），不要预填股票代码或具体参数，由用户后续补充。'
 
 export const FEATURE_OVERVIEW_QUICK_OPTION: QuickReplyOption = {
   id: 'feature-overview',
@@ -36,8 +36,12 @@ const DEFAULT_FALLBACK_OPTIONS: QuickReplyOption[] = [
   { id: 'fb-7', label: '执行清单', sendText: '把建议整理成我本周可执行的具体清单（最多5条）。' }
 ]
 
-/** 合并模型/启发式结果与默认项，去重后最多 MAX_OPTIONS 条；首项固定为「功能总览」追问（除非已存在同文）。 */
+/** 合并模型/启发式结果与默认项；LLM 已给出足够选项时不再混入默认兜底。 */
 export function ensureQuickReplyOptions(extracted: QuickReplyOption[]): QuickReplyOption[] {
+  if (extracted.length >= MIN_OPTIONS) {
+    return extracted.slice(0, MAX_OPTIONS)
+  }
+
   const seen = new Set<string>()
   const out: QuickReplyOption[] = []
 
@@ -79,6 +83,29 @@ export function stripFinAgentChoicesForDisplay(text: string): string {
   return text.slice(0, i).replace(/\s+$/, '')
 }
 
+function normalizeChoiceText(raw: string, maxLen: number): string {
+  const t = raw.trim()
+  if (t.length <= maxLen) return t
+  return `${t.slice(0, maxLen)}…`
+}
+
+/** 结构化选项：按钮文案即发送内容，避免 label 短、send 自动补细节 */
+function optionFromStructuredRow(row: Record<string, unknown>, index: number): QuickReplyOption | null {
+  const sendRaw = row.send ?? row.text
+  const send = typeof sendRaw === 'string' ? sendRaw.trim() : ''
+  let label = typeof row.label === 'string' ? row.label.trim() : ''
+  // 有 label 时以 label 为准发送；无 label 时才用 send
+  const userText = label || send
+  if (!userText || userText.length > MAX_SEND) return null
+  if (!label) label = userText
+  const displayLabel = normalizeChoiceText(label, MAX_LABEL)
+  return {
+    id: `svc-${index}`,
+    label: displayLabel,
+    sendText: label
+  }
+}
+
 function parseStructuredFinAgentChoices(fullText: string): QuickReplyOption[] | null {
   const i = fullText.lastIndexOf(FIN_AGENT_CHOICES_KEY)
   if (i < 0) return null
@@ -97,14 +124,9 @@ function parseStructuredFinAgentChoices(fullText: string): QuickReplyOption[] | 
   for (let j = 0; j < arr.length; j++) {
     const row = arr[j]
     if (!row || typeof row !== 'object') return null
-    const o = row as Record<string, unknown>
-    const sendRaw = o.send ?? o.text
-    const send = typeof sendRaw === 'string' ? sendRaw.trim() : ''
-    if (!send || send.length > MAX_SEND) return null
-    let label = typeof o.label === 'string' ? o.label.trim() : ''
-    if (!label) label = send.length > MAX_LABEL ? `${send.slice(0, MAX_LABEL)}…` : send
-    if (label.length > MAX_LABEL) label = `${label.slice(0, MAX_LABEL)}…`
-    out.push({ id: `svc-${j}`, label, sendText: send })
+    const opt = optionFromStructuredRow(row as Record<string, unknown>, j)
+    if (!opt) return null
+    out.push(opt)
   }
   return out
 }

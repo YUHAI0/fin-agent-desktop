@@ -228,6 +228,8 @@ def main():
         "--paths", paths_arg,
         "--hidden-import", "fin_agent",
         "--hidden-import", "akshare",
+        # akshare 运行时需要 file_fold/calendar.json 等数据文件
+        "--collect-data", "akshare",
         "--distpath", str(py_dist),
         "--workpath", str(py_work),
     ]

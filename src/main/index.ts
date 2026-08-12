@@ -6,6 +6,7 @@ import { readFileSync, existsSync, appendFileSync, createWriteStream, unlink, wr
 import * as http from 'http'
 import * as https from 'https'
 import { promisify, format } from 'util'
+import { getUpdateDownloadCandidates, initUpdateMirror } from './updateMirror'
 
 const execPromise = promisify(exec)
 
@@ -53,70 +54,161 @@ let tray: Tray | null = null
 // ─── 应用内浮动通知队列 ────────────────────────────────────────────────────────
 const TOAST_WIDTH = 360
 const TOAST_HEIGHT = 100
+const TOAST_NEWS_WIDTH = 440
+/** 新闻 Toast 创建时的占位高度，渲染后按内容自适应 */
+const TOAST_NEWS_INITIAL_HEIGHT = 120
+const TOAST_NEWS_MIN_HEIGHT = 88
+const TOAST_NEWS_MAX_HEIGHT = 280
 const TOAST_MARGIN = 16
-const TOAST_DURATION_MS = 6000
+const TOAST_DURATION_MS = 30000
 const TOAST_MAX_STACK = 5
 /** 当前屏幕上显示的通知浮窗，按从下到上排列（index 0 = 最新/最底部） */
-const toastStack: Array<{ win: BrowserWindow; timerId: ReturnType<typeof setTimeout> }> = []
+const toastStack: Array<{
+  win: BrowserWindow
+  timerId: ReturnType<typeof setTimeout>
+  displayId: number
+  height: number
+  width: number
+}> = []
 
-const UPDATE_TOAST_WIDTH = 360
-const UPDATE_TOAST_HEIGHT = 240
+const UPDATE_TOAST_WIDTH = 420
+const UPDATE_TOAST_COMPACT_HEIGHT = 176
+const UPDATE_TOAST_MAX_HEIGHT = 560
+const UPDATE_TOAST_EXPANDED_INITIAL = 420
+/** 当前更新窗实际高度（展开/压缩会变），供其它 toast 堆叠偏移 */
+let updateToastCurrentHeight = UPDATE_TOAST_COMPACT_HEIGHT
 let updateToastWindow: BrowserWindow | null = null
+let updateToastReveal: (() => void) | null = null
+let updateToastRevealed = false
 
 type ToastPayload = DesktopNotificationPayload & {
   /** 传给渲染层的已解析标题/正文（main 侧可能会改写） */
   _title: string
   _body: string
+  _winId?: number
 }
+
+type PendingToastEntry = {
+  payload: ToastPayload
+  notificationIds: string[]
+  newsIds?: string | string[] | null
+  ackRequired?: boolean
+  delivered: boolean
+  /** 仅主投递窗口负责 ACK / inFlight，镜像屏窗口只负责展示 */
+  primaryDelivery: boolean
+  /** 内容就绪后再揭幕，避免白底空窗闪一下 */
+  reveal?: () => void
+  revealed?: boolean
+}
+
+/** webContents.id → 待展示/展示中的 toast，解决 React 挂载前 toast-show 丢失 */
+const pendingToasts = new Map<number, PendingToastEntry>()
 
 function getUpdateToastOffset(): number {
   if (updateToastWindow && !updateToastWindow.isDestroyed()) {
-    return UPDATE_TOAST_HEIGHT + TOAST_MARGIN
+    return updateToastCurrentHeight + TOAST_MARGIN
   }
   return 0
 }
 
-function getToastStartY(index: number, workH: number): number {
-  const offset = getUpdateToastOffset()
-  return workH - TOAST_MARGIN - offset - (index + 1) * (TOAST_HEIGHT + TOAST_MARGIN)
-}
-
-function repositionToastStack(workH: number): void {
-  toastStack.forEach(({ win }, i) => {
-    if (!win.isDestroyed()) {
-      const y = getToastStartY(i, workH)
-      const [cx] = win.getPosition()
-      win.setPosition(cx, y, false)
-    }
-  })
-}
-
-function createToastWindow(payload: ToastPayload): void {
+function placeUpdateToastWindow(win: BrowserWindow, height: number): void {
   const display = screen.getPrimaryDisplay()
   const { width: sw, height: sh } = display.workAreaSize
-  const x = sw - TOAST_WIDTH - TOAST_MARGIN
-  const y = sh + 20 // 从屏幕下方外面开始，再滑入
+  const h = Math.max(
+    UPDATE_TOAST_COMPACT_HEIGHT,
+    Math.min(UPDATE_TOAST_MAX_HEIGHT, Math.round(height))
+  )
+  updateToastCurrentHeight = h
+  const x = sw - UPDATE_TOAST_WIDTH - TOAST_MARGIN
+  // 未揭幕时只改尺寸，保持在屏幕外，避免内容未就绪就闪到目标位
+  const y = updateToastRevealed ? sh - TOAST_MARGIN - h : sh + 10
+  win.setBounds({ x, y, width: UPDATE_TOAST_WIDTH, height: h }, false)
+  if (updateToastRevealed) repositionToastStack()
+}
+
+function getToastStartY(index: number, workH: number, heights: number[]): number {
+  const offset = getUpdateToastOffset()
+  let above = 0
+  for (let i = 0; i < index; i++) {
+    above += (heights[i] || TOAST_HEIGHT) + TOAST_MARGIN
+  }
+  const selfH = heights[index] || TOAST_HEIGHT
+  return workH - TOAST_MARGIN - offset - above - selfH
+}
+
+function repositionToastStack(): void {
+  const byDisplay = new Map<number, Array<{ win: BrowserWindow; height: number; width: number }>>()
+  toastStack.forEach((item) => {
+    if (item.win.isDestroyed()) return
+    const list = byDisplay.get(item.displayId) || []
+    list.push(item)
+    byDisplay.set(item.displayId, list)
+  })
+  for (const [displayId, items] of byDisplay) {
+    const display =
+      screen.getAllDisplays().find((d) => d.id === displayId) || screen.getPrimaryDisplay()
+    const { x: wx, y: wy, width: sw, height: sh } = display.workArea
+    const heights = items.map((it) => it.height || TOAST_HEIGHT)
+    items.forEach(({ win, height, width }, i) => {
+      const y = wy + getToastStartY(i, sh, heights)
+      const toastW = width || TOAST_WIDTH
+      const x = wx + sw - toastW - TOAST_MARGIN
+      if (!win.isDestroyed()) {
+        win.setBounds({ x, y, width: toastW, height: height || TOAST_HEIGHT }, false)
+      }
+    })
+  }
+}
+
+function createToastWindow(
+  payload: ToastPayload,
+  notificationIds: string[] = [],
+  options?: { newsIds?: string | string[] | null; ackRequired?: boolean }
+): void {
+  // 仅在主屏弹出，避免多显示器重复推送
+  createToastWindowOnDisplay(payload, notificationIds, options, screen.getPrimaryDisplay(), true)
+}
+
+function createToastWindowOnDisplay(
+  payload: ToastPayload,
+  notificationIds: string[],
+  options: { newsIds?: string | string[] | null; ackRequired?: boolean } | undefined,
+  display: Electron.Display,
+  primaryDelivery: boolean
+): void {
+  const { x: wx, y: wy, width: sw, height: sh } = display.workArea
+  const isNewsToast = payload.type === 'news' || !!payload.news_id || !!payload.merged
+  const toastW = isNewsToast ? TOAST_NEWS_WIDTH : TOAST_WIDTH
+  const toastH = isNewsToast ? TOAST_NEWS_INITIAL_HEIGHT : TOAST_HEIGHT
+  const x = wx + sw - toastW - TOAST_MARGIN
+  const y = wy + sh + 20 // 从屏幕下方外面开始，再滑入
+  const cursor = screen.getCursorScreenPoint()
+  console.log(
+    `[Toast] target display id=${display.id} scale=${display.scaleFactor} workArea=(${wx},${wy},${sw},${sh}) cursor=(${cursor.x},${cursor.y}) primaryDelivery=${primaryDelivery}`
+  )
 
   if (toastStack.length >= TOAST_MAX_STACK) {
     // 关闭最旧的那个
     const oldest = toastStack.pop()!
     clearTimeout(oldest.timerId)
     if (!oldest.win.isDestroyed()) {
-      oldest.win.webContents.send('toast-dismiss')
-      setTimeout(() => {
-        if (!oldest.win.isDestroyed()) oldest.win.close()
-      }, 250)
+      oldest.win.hide()
+      oldest.win.close()
     }
   }
 
   const win = new BrowserWindow({
-    width: TOAST_WIDTH,
-    height: TOAST_HEIGHT,
+    width: toastW,
+    height: toastH,
     x,
     y,
     show: false,
     frame: false,
-    transparent: true,
+    // Windows 上 transparent 窗口经常 isVisible=true 但像素完全透出，看起来像没弹窗
+    transparent: false,
+    // 与 Toast 卡片同色，避免加载期白底闪一下
+    backgroundColor: '#1e1f24',
+    roundedCorners: true,
     resizable: false,
     movable: false,
     minimizable: false,
@@ -125,73 +217,159 @@ function createToastWindow(payload: ToastPayload): void {
     alwaysOnTop: true,
     skipTaskbar: true,
     focusable: false,
+    hasShadow: true,
+    paintWhenInitiallyHidden: true,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
+      sandbox: false,
+      backgroundThrottling: false
     }
   })
   win.setAlwaysOnTop(true, 'screen-saver')
-
-  const closeToast = () => {
-    const idx = toastStack.findIndex((t) => t.win === win)
-    if (idx !== -1) toastStack.splice(idx, 1)
-    if (!win.isDestroyed()) {
-      win.webContents.send('toast-dismiss')
-      setTimeout(() => {
-        if (!win.isDestroyed()) win.close()
-      }, 300)
-    }
-    repositionToastStack(sh)
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  const paintToastChrome = () => {
+    void win.webContents.insertCSS(
+      'html,body,#root{background:#1e1f24!important;margin:0;padding:0;overflow:hidden;}'
+    )
   }
+  win.webContents.on('dom-ready', paintToastChrome)
+  paintToastChrome()
 
-  const timerId = setTimeout(closeToast, TOAST_DURATION_MS)
-  toastStack.unshift({ win, timerId })
+  const contentsId = win.webContents.id
+  const toastPayload: ToastPayload = { ...payload, _winId: win.id }
 
-  win.webContents.on('did-finish-load', () => {
-    win.webContents.send('toast-show', { ...payload, _winId: win.id })
-    win.show()
-    // 滑入动画：setPosition 从屏幕外滑到目标位
-    const targetY = getToastStartY(0, sh)
-    repositionToastStack(sh)
-    win.setPosition(x, sh + 10, false)
-    // 使用多步动画（每帧约 16ms，动画约 250ms）
+  let slideStarted = false
+  const startReveal = () => {
+    if (slideStarted || win.isDestroyed()) return
+    slideStarted = true
+    const pending = pendingToasts.get(contentsId)
+    if (pending) pending.revealed = true
+    // 内容与高度已就绪后再显示，避免空窗/白底闪现
+    if (!win.isVisible()) win.showInactive()
+    win.moveTop()
+    repositionToastStack()
+    win.setPosition(x, wy + sh + 10, false)
     let step = 0
     const steps = 16
-    const startY = sh + 10
-    const endY = targetY
+    const startY = wy + sh + 10
+    const liveEndY = () => {
+      const stackOnDisplay = toastStack.filter(
+        (t) => t.displayId === display.id && !t.win.isDestroyed()
+      )
+      const heights = stackOnDisplay.map((t) => t.height || TOAST_HEIGHT)
+      const idx = Math.max(
+        0,
+        stackOnDisplay.findIndex((t) => t.win === win)
+      )
+      return wy + getToastStartY(idx, sh, heights)
+    }
     const animate = () => {
       step++
       const t = step / steps
-      const eased = 1 - Math.pow(1 - t, 3) // ease-out cubic
+      const eased = 1 - Math.pow(1 - t, 3)
+      const endY = liveEndY()
       const curY = Math.round(startY + (endY - startY) * eased)
       if (!win.isDestroyed()) win.setPosition(x, curY, false)
       if (step < steps) setTimeout(animate, 16)
+      else if (!win.isDestroyed()) {
+        repositionToastStack()
+        const b = win.getBounds()
+        console.log(
+          `[Toast] slide done id=${contentsId} finalPos=(${b.x},${b.y}) height=${b.height} visible=${win.isVisible()}`
+        )
+      }
     }
     animate()
-  })
+  }
 
+  pendingToasts.set(contentsId, {
+    payload: toastPayload,
+    notificationIds: primaryDelivery ? notificationIds : [],
+    newsIds: primaryDelivery ? options?.newsIds : undefined,
+    ackRequired: primaryDelivery ? options?.ackRequired : false,
+    delivered: false,
+    primaryDelivery,
+    reveal: startReveal,
+    revealed: false
+  })
+  console.log(
+    `[Toast] create id=${contentsId} title="${payload._title}" ids=${JSON.stringify(notificationIds)} pos=(${x},${y}) workArea=(${wx},${wy},${sw},${sh})`
+  )
+
+  const releaseInFlightIfNeeded = () => {
+    const entry = pendingToasts.get(contentsId)
+    if (!entry || entry.delivered || !entry.primaryDelivery) return
+    entry.notificationIds.forEach((id) => inFlightNotificationIds.delete(id))
+  }
+
+  let closing = false
   const onToastClick = (_event: Electron.IpcMainEvent) => {
-    if (_event.sender.id !== win.webContents.id) return
+    if (_event.sender.id !== contentsId) return
     clearTimeout(timerId)
     closeToast()
     handleNotificationActivation(payload)
-    ipcMain.off('toast-click', onToastClick)
-    ipcMain.off('toast-close', onToastClose)
   }
   const onToastClose = (_event: Electron.IpcMainEvent) => {
-    if (_event.sender.id !== win.webContents.id) return
+    if (_event.sender.id !== contentsId) return
     clearTimeout(timerId)
     closeToast()
+  }
+
+  const closeToast = () => {
+    if (closing) return
+    closing = true
+    clearTimeout(timerId)
     ipcMain.off('toast-click', onToastClick)
     ipcMain.off('toast-close', onToastClose)
+    const idx = toastStack.findIndex((t) => t.win === win)
+    if (idx !== -1) toastStack.splice(idx, 1)
+    releaseInFlightIfNeeded()
+    pendingToasts.delete(contentsId)
+    // 不透明窗口：内容 CSS 淡出后底色仍会留在屏幕上，必须立刻 hide/destroy
+    if (!win.isDestroyed()) {
+      try {
+        win.hide()
+      } catch {
+        // ignore
+      }
+      try {
+        win.destroy()
+      } catch {
+        // ignore
+      }
+    }
+    repositionToastStack()
   }
+
+  const timerId = setTimeout(closeToast, TOAST_DURATION_MS)
+  toastStack.unshift({ win, timerId, displayId: display.id, height: toastH, width: toastW })
+
+  win.webContents.on('did-finish-load', () => {
+    console.log(`[Toast] did-finish-load id=${contentsId}, sending toast-show`)
+    win.webContents.send('toast-show', toastPayload)
+    // 兜底：若渲染层未回调，超时后仍揭幕，避免永远不显示
+    setTimeout(() => {
+      const entry = pendingToasts.get(contentsId)
+      if (entry && !entry.revealed) startReveal()
+    }, 1200)
+  })
+
+  win.webContents.on('did-fail-load', (_e, code, desc) => {
+    console.error(`[Toast] did-fail-load id=${contentsId} code=${code} desc=${desc}`)
+  })
+
+  win.on('closed', () => {
+    releaseInFlightIfNeeded()
+    pendingToasts.delete(contentsId)
+  })
+
   ipcMain.on('toast-click', onToastClick)
   ipcMain.on('toast-close', onToastClose)
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     win.loadURL(`${process.env['ELECTRON_RENDERER_URL']}/#/toast`)
   } else {
-    win.loadFile(join(__dirname, '../renderer/index.html'), { hash: 'toast' })
+    win.loadFile(join(__dirname, '../renderer/index.html'), { hash: '/toast' })
   }
 }
 let pyProc: ChildProcess | null = null
@@ -225,6 +403,14 @@ type DesktopNotificationPayload = {
   news_id?: string | null
   news_ids?: string[]
   merged?: boolean
+  news_count?: number
+  sentiment?: 'bullish' | 'bearish' | 'neutral' | null
+  sentiment_counts?: {
+    bullish?: number
+    bearish?: number
+    neutral?: number
+    unknown?: number
+  }
   subscription_id?: string | null
   subscription_ids?: string[]
   source?: string
@@ -232,6 +418,7 @@ type DesktopNotificationPayload = {
   task_id?: string
   ts_code?: string
   ack_required?: boolean
+  update?: Partial<UpdateInfo>
 }
 
 function loadSeenNotifications(): void {
@@ -352,11 +539,29 @@ function handleNotificationActivation(notif: DesktopNotificationPayload): void {
   chatWindow.show()
   chatWindow.focus()
   if (notif.type === 'price_alert') {
-    chatWindow.webContents.send('navigate-route', '/')
-    chatWindow.webContents.send('price-alert-notification-open', {
-      taskId: notif.task_id || undefined,
-      tsCode: notif.ts_code || undefined
-    })
+    const tsCode = (notif.ts_code || '').trim()
+    if (tsCode) {
+      chatWindow.webContents.send(
+        'navigate-route',
+        `/stock/${encodeURIComponent(tsCode)}`
+      )
+    } else {
+      // 无标的代码时回退提醒任务列表
+      chatWindow.webContents.send('navigate-route', '/chat?reminders=1')
+      chatWindow.webContents.send('price-alert-notification-open', {
+        taskId: notif.task_id || undefined,
+        tsCode: undefined
+      })
+    }
+    return
+  }
+  if (notif.type === 'app_update') {
+    // 通知用统一 Toast；点击后再打开更新操作浮窗（下载/安装）
+    if (pendingUpdate) {
+      createUpdateToastWindow(pendingUpdate)
+    } else {
+      chatWindow.webContents.send('navigate-route', '/about')
+    }
     return
   }
   if (notif.type === 'news' || notif.news_id || notif.merged) {
@@ -926,6 +1131,8 @@ interface UpdateInfo {
   version: string
   tagName: string
   downloadUrl: string
+  /** 官方 GitHub browser_download_url，镜像失败时回退 */
+  originalDownloadUrl?: string
   fileName: string
   releaseNotes: string
 }
@@ -933,6 +1140,37 @@ interface UpdateInfo {
 let pendingUpdate: UpdateInfo | null = null
 let updateDownloadPath = ''
 let updateDownloading = false
+/** 当前下载请求，关闭窗口时用于中断 */
+let activeUpdateRequest: http.ClientRequest | null = null
+let updateDownloadAborted = false
+
+class UpdateDownloadAbortedError extends Error {
+  constructor() {
+    super('下载已取消')
+    this.name = 'UpdateDownloadAbortedError'
+  }
+}
+
+function abortActiveUpdateDownload(): void {
+  updateDownloadAborted = true
+  const req = activeUpdateRequest
+  activeUpdateRequest = null
+  if (req) {
+    try {
+      req.destroy(new UpdateDownloadAbortedError())
+    } catch {
+      // ignore
+    }
+  }
+  if (updateDownloadPath) {
+    try {
+      unlink(updateDownloadPath, () => {})
+    } catch {
+      // ignore
+    }
+  }
+  updateDownloading = false
+}
 
 function sendUpdateToastEvent(channel: string, data?: unknown): void {
   if (updateToastWindow && !updateToastWindow.isDestroyed()) {
@@ -941,18 +1179,28 @@ function sendUpdateToastEvent(channel: string, data?: unknown): void {
 }
 
 function closeUpdateToastWindow(): void {
+  abortActiveUpdateDownload()
+  updateToastReveal = null
+  updateToastRevealed = false
   if (!updateToastWindow || updateToastWindow.isDestroyed()) {
     updateToastWindow = null
+    repositionToastStack()
     return
   }
-  updateToastWindow.webContents.send('update-dismiss')
-  setTimeout(() => {
-    if (updateToastWindow && !updateToastWindow.isDestroyed()) {
-      updateToastWindow.close()
-    }
-    updateToastWindow = null
-    repositionToastStack(screen.getPrimaryDisplay().workAreaSize.height)
-  }, 280)
+  const win = updateToastWindow
+  updateToastWindow = null
+  // closable:false 时 close() 可能无效；且淡出后实色/半透明壳会残留，必须立刻销毁
+  try {
+    win.hide()
+  } catch {
+    // ignore
+  }
+  try {
+    win.destroy()
+  } catch {
+    // ignore
+  }
+  repositionToastStack()
 }
 
 function slideInWindow(win: BrowserWindow, x: number, targetY: number, startY: number): void {
@@ -973,47 +1221,80 @@ function slideInWindow(win: BrowserWindow, x: number, targetY: number, startY: n
 function createUpdateToastWindow(info: UpdateInfo): void {
   const display = screen.getPrimaryDisplay()
   const { width: sw, height: sh } = display.workAreaSize
+  const hasNotes = Boolean(info.releaseNotes && info.releaseNotes.trim())
+  const initialH = hasNotes ? UPDATE_TOAST_EXPANDED_INITIAL : UPDATE_TOAST_COMPACT_HEIGHT
+  updateToastCurrentHeight = initialH
   const x = sw - UPDATE_TOAST_WIDTH - TOAST_MARGIN
-  const targetY = sh - TOAST_MARGIN - UPDATE_TOAST_HEIGHT
 
   if (updateToastWindow && !updateToastWindow.isDestroyed()) {
     sendUpdateToastEvent('update-show', info)
-    updateToastWindow.show()
+    updateToastRevealed = true
+    placeUpdateToastWindow(updateToastWindow, initialH)
+    if (!updateToastWindow.isVisible()) updateToastWindow.showInactive()
+    updateToastWindow.moveTop()
     return
   }
 
   const win = new BrowserWindow({
     width: UPDATE_TOAST_WIDTH,
-    height: UPDATE_TOAST_HEIGHT,
+    height: initialH,
     x,
     y: sh + 10,
     show: false,
     frame: false,
-    transparent: true,
+    transparent: false,
+    backgroundColor: '#1e1f24',
+    roundedCorners: true,
     resizable: false,
     movable: false,
     minimizable: false,
     maximizable: false,
-    closable: false,
+    closable: true,
     alwaysOnTop: true,
     skipTaskbar: true,
-    focusable: true,
+    focusable: false,
+    hasShadow: true,
+    paintWhenInitiallyHidden: true,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
+      sandbox: false,
+      backgroundThrottling: false
     }
   })
   win.setAlwaysOnTop(true, 'screen-saver')
+  const paintChrome = () => {
+    void win.webContents.insertCSS(
+      'html,body,#root{background:#1e1f24!important;margin:0;padding:0;overflow:hidden;}'
+    )
+  }
+  win.webContents.on('dom-ready', paintChrome)
+  paintChrome()
+
   updateToastWindow = win
+  updateToastRevealed = false
+  updateToastReveal = () => {
+    if (updateToastRevealed || win.isDestroyed()) return
+    updateToastRevealed = true
+    const h = updateToastCurrentHeight
+    const targetY = sh - TOAST_MARGIN - h
+    if (!win.isVisible()) win.showInactive()
+    win.moveTop()
+    slideInWindow(win, x, targetY, sh + 10)
+    repositionToastStack()
+    console.log(`[UpdateToast] revealed height=${h} targetY=${targetY}`)
+  }
 
   win.on('closed', () => {
     if (updateToastWindow === win) updateToastWindow = null
-    repositionToastStack(screen.getPrimaryDisplay().workAreaSize.height)
+    updateToastCurrentHeight = UPDATE_TOAST_COMPACT_HEIGHT
+    updateToastReveal = null
+    updateToastRevealed = false
+    abortActiveUpdateDownload()
+    repositionToastStack()
   })
 
   const onDismiss = (event: Electron.IpcMainEvent) => {
     if (event.sender.id !== win.webContents.id) return
-    if (updateDownloading) return
     ipcMain.off('update-toast-dismiss', onDismiss)
     closeUpdateToastWindow()
   }
@@ -1021,9 +1302,10 @@ function createUpdateToastWindow(info: UpdateInfo): void {
 
   win.webContents.on('did-finish-load', () => {
     win.webContents.send('update-show', info)
-    win.show()
-    slideInWindow(win, x, targetY, sh + 10)
-    repositionToastStack(sh)
+    // 兜底：渲染层未回调时仍揭幕
+    setTimeout(() => {
+      if (!updateToastRevealed && updateToastWindow === win) updateToastReveal?.()
+    }, 1500)
   })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
@@ -1039,19 +1321,63 @@ function downloadFileWithProgress(
   onProgress: (percent: number, receivedBytes: number, totalBytes: number) => void
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    const file = createWriteStream(dest)
+    if (updateDownloadAborted) {
+      reject(new UpdateDownloadAbortedError())
+      return
+    }
 
-    const handleResponse = (response: http.IncomingMessage) => {
-      if (response.statusCode === 301 || response.statusCode === 302) {
+    const file = createWriteStream(dest)
+    let settled = false
+    const settle = (fn: () => void) => {
+      if (settled) return
+      settled = true
+      fn()
+    }
+
+    const attachReq = (req: http.ClientRequest) => {
+      activeUpdateRequest = req
+      req.on('error', (err) => {
+        if (activeUpdateRequest === req) activeUpdateRequest = null
+        settle(() => {
+          unlink(dest, () => {})
+          reject(updateDownloadAborted || err?.name === 'UpdateDownloadAbortedError'
+            ? new UpdateDownloadAbortedError()
+            : err)
+        })
+      })
+    }
+
+    const handleResponse = (response: http.IncomingMessage, currentUrl: string) => {
+      if (updateDownloadAborted) {
+        response.destroy()
+        settle(() => {
+          unlink(dest, () => {})
+          reject(new UpdateDownloadAbortedError())
+        })
+        return
+      }
+      if (
+        response.statusCode === 301 ||
+        response.statusCode === 302 ||
+        response.statusCode === 307 ||
+        response.statusCode === 308
+      ) {
         if (response.headers.location) {
-          https.get(response.headers.location, { headers: { 'User-Agent': 'fin-agent-desktop' } }, handleResponse)
-            .on('error', (err) => { unlink(dest, () => {}); reject(err) })
+          const nextUrl = new URL(response.headers.location, currentUrl).toString()
+          response.resume()
+          const getter = nextUrl.startsWith('http://') ? http.get : https.get
+          const nextReq = getter(nextUrl, { headers: { 'User-Agent': 'fin-agent-desktop' } }, (res) =>
+            handleResponse(res, nextUrl)
+          )
+          attachReq(nextReq)
           return
         }
       }
       if (response.statusCode !== 200) {
-        unlink(dest, () => {})
-        reject(new Error(`Download failed: HTTP ${response.statusCode}`))
+        settle(() => {
+          unlink(dest, () => {})
+          reject(new Error(`Download failed: HTTP ${response.statusCode}`))
+        })
         return
       }
 
@@ -1059,6 +1385,10 @@ function downloadFileWithProgress(
       let receivedBytes = 0
 
       response.on('data', (chunk: Buffer) => {
+        if (updateDownloadAborted) {
+          response.destroy()
+          return
+        }
         receivedBytes += chunk.length
         const percent = totalBytes > 0 ? Math.round((receivedBytes / totalBytes) * 100) : 0
         onProgress(percent, receivedBytes, totalBytes)
@@ -1066,68 +1396,186 @@ function downloadFileWithProgress(
 
       response.pipe(file)
 
-      file.on('finish', () => { file.close(); resolve() })
-      file.on('error', (err) => { unlink(dest, () => {}); reject(err) })
+      file.on('finish', () => {
+        file.close()
+        settle(() => {
+          if (updateDownloadAborted) {
+            unlink(dest, () => {})
+            reject(new UpdateDownloadAbortedError())
+          } else {
+            resolve()
+          }
+        })
+      })
+      file.on('error', (err) => {
+        settle(() => {
+          unlink(dest, () => {})
+          reject(updateDownloadAborted ? new UpdateDownloadAbortedError() : err)
+        })
+      })
     }
 
-    https.get(url, { headers: { 'User-Agent': 'fin-agent-desktop' } }, handleResponse)
-      .on('error', (err) => { unlink(dest, () => {}); reject(err) })
+    const getter = url.startsWith('http://') ? http.get : https.get
+    const req = getter(url, { headers: { 'User-Agent': 'fin-agent-desktop' } }, (res) =>
+      handleResponse(res, url)
+    )
+    attachReq(req)
   })
 }
 
-function checkForUpdates() {
-  console.log('[Update] Starting update check...')
-  const req = https.request(
-    {
-      hostname: 'api.github.com',
-      path: '/repos/YUHAI0/fin-agent-desktop/releases/latest',
-      method: 'GET',
-      headers: { 'User-Agent': 'fin-agent-desktop' }
-    },
-    (res) => {
-      let data = ''
-      res.on('data', (chunk) => (data += chunk))
-      res.on('end', () => {
-        if (res.statusCode !== 200) return
+async function downloadUpdatePackage(
+  originalUrl: string,
+  dest: string,
+  onProgress: (percent: number, receivedBytes: number, totalBytes: number) => void
+): Promise<string> {
+  let candidates = await getUpdateDownloadCandidates(originalUrl)
+  console.log('[Update] download candidates:', candidates)
+  let lastError: unknown
+  let refreshedOnce = false
+
+  for (let i = 0; i < candidates.length; i++) {
+    if (updateDownloadAborted) throw new UpdateDownloadAbortedError()
+    const url = candidates[i]
+    try {
+      await downloadFileWithProgress(url, dest, onProgress)
+      console.log('[Update] downloaded via', url)
+      return url
+    } catch (err) {
+      if (updateDownloadAborted || (err as Error)?.name === 'UpdateDownloadAbortedError') {
+        throw new UpdateDownloadAbortedError()
+      }
+      lastError = err
+      console.error(`[Update] download failed (${i + 1}/${candidates.length}):`, url, err)
+      try {
+        unlink(dest, () => {})
+      } catch {
+        // ignore
+      }
+      if (!refreshedOnce && i === 0) {
+        refreshedOnce = true
         try {
-          const release = JSON.parse(data)
-          const latestVersion = release.tag_name.replace(/^v/, '')
-          const currentVersion = getVersion()
-          console.log(`[Update] current=${currentVersion}, latest=${latestVersion}`)
+          const refreshed = await getUpdateDownloadCandidates(originalUrl, { forceRefresh: true })
+          const failed = new Set([url])
+          candidates = [url, ...refreshed.filter((u) => !failed.has(u))]
+          // 去重保序
+          const seen = new Set<string>()
+          candidates = candidates.filter((u) => {
+            if (seen.has(u)) return false
+            seen.add(u)
+            return true
+          })
+          console.log('[Update] candidates after mirror refresh:', candidates)
+        } catch (refreshErr) {
+          console.error('[Update] mirror force refresh failed', refreshErr)
+        }
+      }
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError))
+}
 
-          if (compareVersions(latestVersion, currentVersion) <= 0) return
+type UpdateCheckResult =
+  | { status: 'available'; version: string; currentVersion: string }
+  | { status: 'uptodate'; version: string; currentVersion: string }
+  | { status: 'no_asset'; version: string; currentVersion: string }
+  | { status: 'error'; error: string }
 
-          const assetExt = process.platform === 'win32' ? '.exe' : process.platform === 'darwin' ? '.dmg' : ''
-          const asset = release.assets?.find((a: any) => a.name.endsWith(assetExt))
-          if (!asset?.browser_download_url) {
-            console.log('[Update] No suitable asset found')
+function checkForUpdates(options?: { showWindow?: boolean }): Promise<UpdateCheckResult> {
+  const showWindow = options?.showWindow !== false
+  console.log('[Update] Starting update check...')
+  return new Promise((resolve) => {
+    const req = https.request(
+      {
+        hostname: 'api.github.com',
+        path: '/repos/YUHAI0/fin-agent-desktop/releases/latest',
+        method: 'GET',
+        headers: { 'User-Agent': 'fin-agent-desktop' }
+      },
+      (res) => {
+        let data = ''
+        res.on('data', (chunk) => (data += chunk))
+        res.on('end', () => {
+          if (res.statusCode !== 200) {
+            const error = `检查失败：HTTP ${res.statusCode}`
+            console.error('[Update]', error)
+            resolve({ status: 'error', error })
             return
           }
+          try {
+            const release = JSON.parse(data)
+            const latestVersion = String(release.tag_name || '').replace(/^v/, '')
+            const currentVersion = getVersion()
+            console.log(`[Update] current=${currentVersion}, latest=${latestVersion}`)
 
-          pendingUpdate = {
-            version: latestVersion,
-            tagName: release.tag_name,
-            downloadUrl: asset.browser_download_url,
-            fileName: asset.name,
-            releaseNotes: (release.body || '').slice(0, 400)
+            if (!latestVersion) {
+              resolve({ status: 'error', error: '未获取到远端版本号' })
+              return
+            }
+
+            if (compareVersions(latestVersion, currentVersion) <= 0) {
+              resolve({ status: 'uptodate', version: latestVersion, currentVersion })
+              return
+            }
+
+            const assetExt =
+              process.platform === 'win32' ? '.exe' : process.platform === 'darwin' ? '.dmg' : ''
+            const asset = release.assets?.find((a: any) => a.name.endsWith(assetExt))
+            if (!asset?.browser_download_url) {
+              console.log('[Update] No suitable asset found')
+              resolve({ status: 'no_asset', version: latestVersion, currentVersion })
+              return
+            }
+
+            const originalDownloadUrl = asset.browser_download_url as string
+            pendingUpdate = {
+              version: latestVersion,
+              tagName: release.tag_name,
+              downloadUrl: originalDownloadUrl,
+              originalDownloadUrl,
+              fileName: asset.name,
+              releaseNotes: (release.body || '').slice(0, 2500)
+            }
+
+            void getUpdateDownloadCandidates(originalDownloadUrl)
+              .then((urls) => {
+                if (
+                  pendingUpdate &&
+                  pendingUpdate.originalDownloadUrl === originalDownloadUrl &&
+                  urls[0]
+                ) {
+                  pendingUpdate.downloadUrl = urls[0]
+                }
+              })
+              .catch((err) => console.error('[Update] mirror warm-up failed', err))
+
+            if (showWindow) {
+              createUpdateToastWindow(pendingUpdate)
+              console.log(`[Update] Showing update window for v${latestVersion}`)
+            }
+            resolve({ status: 'available', version: latestVersion, currentVersion })
+          } catch (e) {
+            console.error('[Update] Parse error', e)
+            resolve({ status: 'error', error: e instanceof Error ? e.message : String(e) })
           }
-
-          // 弹出右下角更新浮窗
-          createUpdateToastWindow(pendingUpdate)
-          console.log(`[Update] Showing update toast for v${latestVersion}`)
-        } catch (e) {
-          console.error('[Update] Parse error', e)
-        }
-      })
-    }
-  )
-  req.on('error', (e) => console.error('[Update] Check failed', e))
-  req.end()
+        })
+      }
+    )
+    req.on('error', (e) => {
+      console.error('[Update] Check failed', e)
+      resolve({ status: 'error', error: e.message || String(e) })
+    })
+    req.setTimeout(15000, () => {
+      req.destroy()
+      resolve({ status: 'error', error: '检查超时，请稍后重试' })
+    })
+    req.end()
+  })
 }
 
 app.whenReady().then(() => {
   electronApp.setAppUserModelId(APP_USER_MODEL_ID)
   ensureWindowsToastShortcut()
+  initUpdateMirror(app.getPath('userData'))
 
   if (!Notification.isSupported()) {
     console.warn('[Notification] System notifications are not supported on this platform')
@@ -1209,9 +1657,9 @@ app.whenReady().then(() => {
   setTimeout(checkConfigLoop, 1000)
 
   // Initial update check
-  checkForUpdates()
+  void checkForUpdates()
   // Check updates every 4 hours
-  setInterval(checkForUpdates, 4 * 60 * 60 * 1000)
+  setInterval(() => void checkForUpdates(), 4 * 60 * 60 * 1000)
 
   // Poll for desktop notifications from scheduler
   const pollNotifications = async () => {
@@ -1246,14 +1694,54 @@ app.whenReady().then(() => {
           if (ids.length > 0) {
             ids.forEach((id) => inFlightNotificationIds.add(id))
           }
-          ids.forEach((id) => inFlightNotificationIds.delete(id))
 
           const title = notif.title || 'Fin-Agent 提醒'
           const body = notif.body || ''
+          console.log(
+            `[Toast] poll hit type=${notif.type || ''} title="${title}" ids=${JSON.stringify(ids)} ack=${!!notif.ack_required}`
+          )
 
-          // 使用应用内浮窗通知，不依赖系统权限
-          createToastWindow({ ...notif, _title: title, _body: body })
-          confirmNotificationDelivery(ids, notif)
+          // 测试推送的 app_update：写入 pendingUpdate 并直接打开更新窗（不走飞书 Toast）
+          if (notif.type === 'app_update') {
+            const update = notif.update
+            if (update?.version) {
+              const downloadUrl =
+                update.downloadUrl || 'https://example.com/Fin-Agent-test.exe'
+              pendingUpdate = {
+                version: update.version || '9.9.9',
+                tagName: update.tagName || `v${update.version || '9.9.9'}`,
+                downloadUrl,
+                originalDownloadUrl: update.originalDownloadUrl || downloadUrl,
+                fileName: update.fileName || `Fin-Agent-${update.version || '9.9.9'}-test.exe`,
+                releaseNotes:
+                  update.releaseNotes || body || '发现新版本，点击通知后可下载安装。'
+              }
+              if (ids.length > 0) {
+                markNotificationsSeen(ids)
+                persistSeenNotificationsNow()
+                if (notif.ack_required) {
+                  void ackNotifications(ids, notif.news_ids?.length ? notif.news_ids : notif.news_id)
+                }
+                ids.forEach((id) => inFlightNotificationIds.delete(id))
+              }
+              createUpdateToastWindow(pendingUpdate)
+              console.log(`[Update] test app_update → update window v${pendingUpdate.version}`)
+            } else if (ids.length > 0) {
+              ids.forEach((id) => inFlightNotificationIds.delete(id))
+            }
+            return
+          }
+
+          // 应用内浮窗（飞书式），不依赖系统通知权限；
+          // 等渲染层 toast-shown 后再 ACK，避免空白窗假成功
+          createToastWindow(
+            { ...notif, _title: title, _body: body },
+            ids,
+            {
+              newsIds: notif.news_ids?.length ? notif.news_ids : notif.news_id,
+              ackRequired: notif.ack_required
+            }
+          )
         })
       }
     } catch (e) {
@@ -1615,24 +2103,146 @@ app.whenReady().then(() => {
   // ── 应用内更新 IPC ─────────────────────────────────────────────────────────
   ipcMain.handle('get-pending-update', () => pendingUpdate)
 
+  ipcMain.handle('check-for-updates', async () => checkForUpdates({ showWindow: true }))
+
+  ipcMain.handle('resize-update-toast', (_e, height: number) => {
+    if (!updateToastWindow || updateToastWindow.isDestroyed()) return { success: false }
+    placeUpdateToastWindow(updateToastWindow, height)
+    return { success: true, height: updateToastCurrentHeight }
+  })
+
+  ipcMain.on('update-toast-ready', (event) => {
+    if (!updateToastWindow || updateToastWindow.isDestroyed()) return
+    if (event.sender.id !== updateToastWindow.webContents.id) return
+    updateToastReveal?.()
+  })
+
+  ipcMain.handle('resize-toast', (event, height: number) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win || win.isDestroyed()) return { success: false }
+    const entry = toastStack.find((t) => t.win === win)
+    if (!entry) return { success: false }
+    const isNews = entry.width >= TOAST_NEWS_WIDTH - 1
+    const minH = isNews ? TOAST_NEWS_MIN_HEIGHT : 72
+    const maxH = isNews ? TOAST_NEWS_MAX_HEIGHT : TOAST_HEIGHT + 24
+    const h = Math.max(minH, Math.min(maxH, Math.round(Number(height) || minH)))
+    if (Math.abs((entry.height || 0) - h) <= 1) {
+      return { success: true, height: entry.height }
+    }
+    entry.height = h
+    repositionToastStack()
+    console.log(`[Toast] resize id=${event.sender.id} height=${h}`)
+    return { success: true, height: h }
+  })
+
+  ipcMain.handle('get-pending-toast', (event) => {
+    const entry = pendingToasts.get(event.sender.id)
+    return entry?.payload ?? null
+  })
+
+  ipcMain.on('toast-shown', (event) => {
+    const entry = pendingToasts.get(event.sender.id)
+    if (!entry) return
+    // 先揭幕再标记 delivered，保证只滑入一次
+    if (!entry.revealed) {
+      entry.reveal?.()
+    }
+    if (entry.delivered) return
+    entry.delivered = true
+    console.log(
+      `[Toast] shown confirmed id=${event.sender.id} title="${entry.payload._title}"`
+    )
+    const ids = entry.notificationIds
+    if (ids.length > 0) {
+      ids.forEach((id) => inFlightNotificationIds.delete(id))
+      confirmNotificationDelivery(ids, {
+        ...entry.payload,
+        ack_required: entry.ackRequired,
+        news_id: Array.isArray(entry.newsIds) ? entry.newsIds[0] : entry.newsIds,
+        news_ids: Array.isArray(entry.newsIds)
+          ? entry.newsIds
+          : entry.newsIds
+            ? [entry.newsIds]
+            : undefined
+      })
+    }
+  })
+
+  ipcMain.handle('set-toast-chrome', (event, theme?: string) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win || win.isDestroyed()) return { success: false }
+    const light = theme === 'light'
+    const bg = light ? '#ffffff' : '#1e1f24'
+    try {
+      win.setBackgroundColor(bg)
+    } catch {
+      // ignore
+    }
+    void win.webContents.insertCSS(
+      `html,body,#root{background:${bg}!important;margin:0;padding:0;overflow:hidden;}`
+    )
+    return { success: true, background: bg }
+  })
+
+  // 开发期：手动触发一条测试浮窗，便于验证显示链路
+  ipcMain.handle('debug-show-toast', () => {
+    const id = `debug_toast_${Date.now()}`
+    createToastWindow(
+      {
+        notification_id: id,
+        type: 'price_alert',
+        title: '测试桌面通知',
+        body: '如果你能看到这条，飞书式浮窗已生效',
+        _title: '测试桌面通知',
+        _body: '如果你能看到这条，飞书式浮窗已生效'
+      },
+      [id],
+      { ackRequired: false }
+    )
+    return { success: true, id }
+  })
+
   ipcMain.handle('start-update-download', async () => {
     if (!pendingUpdate) return { error: '没有待更新版本' }
     if (updateDownloading) return { error: '已在下载中' }
     updateDownloading = true
-    updateDownloadPath = join(app.getPath('temp'), pendingUpdate.fileName)
+    updateDownloadAborted = false
+    const safeName = (pendingUpdate.fileName || 'Fin-Agent-update.exe').replace(/[^\w.\-]+/g, '_')
+    updateDownloadPath = join(
+      app.getPath('temp'),
+      `fa-update-${Date.now()}-${process.pid}-${safeName}`
+    )
+    const originalUrl = pendingUpdate.originalDownloadUrl || pendingUpdate.downloadUrl
     try {
-      await downloadFileWithProgress(
-        pendingUpdate.downloadUrl,
+      const usedUrl = await downloadUpdatePackage(
+        originalUrl,
         updateDownloadPath,
         (percent, received, total) => {
-          sendUpdateToastEvent('update-download-progress', { percent, received, total })
+          if (!updateDownloadAborted) {
+            sendUpdateToastEvent('update-download-progress', { percent, received, total })
+          }
         }
       )
+      if (updateDownloadAborted) {
+        updateDownloading = false
+        return { error: '下载已取消', cancelled: true }
+      }
+      if (pendingUpdate) pendingUpdate.downloadUrl = usedUrl
       updateDownloading = false
+      activeUpdateRequest = null
       sendUpdateToastEvent('update-download-done')
       return { success: true }
     } catch (err: any) {
+      const cancelled =
+        updateDownloadAborted ||
+        err?.name === 'UpdateDownloadAbortedError' ||
+        String(err?.message || err).includes('下载已取消')
       updateDownloading = false
+      activeUpdateRequest = null
+      if (cancelled) {
+        console.log('[Update] download cancelled by user')
+        return { error: '下载已取消', cancelled: true }
+      }
       sendUpdateToastEvent('update-download-error', String(err?.message ?? err))
       return { error: String(err?.message ?? err) }
     }
@@ -1825,6 +2435,27 @@ app.whenReady().then(() => {
 
   ipcMain.handle('delete-position', async (_e, id: string | undefined, tsCode: string) =>
     makeApiRequest('/portfolio/position/delete', 'POST', { id, ts_code: tsCode })
+  )
+
+  ipcMain.handle('search-stocks', async (_e, q: string) =>
+    makeApiRequest(`/market/search?q=${encodeURIComponent(q || '')}`)
+  )
+  ipcMain.handle('get-stock-quote', async (_e, tsCode: string) =>
+    makeApiRequest(`/market/quote?ts_code=${encodeURIComponent(tsCode || '')}`)
+  )
+  ipcMain.handle('get-stock-kline', async (_e, tsCode: string, period?: string) =>
+    makeApiRequest(
+      `/market/kline?ts_code=${encodeURIComponent(tsCode || '')}&period=${encodeURIComponent(period || '6M')}`
+    )
+  )
+  ipcMain.handle('get-stock-valuation', async (_e, tsCode: string) =>
+    makeApiRequest(`/market/valuation?ts_code=${encodeURIComponent(tsCode || '')}`)
+  )
+  ipcMain.handle('get-stock-financials', async (_e, tsCode: string) =>
+    makeApiRequest(`/market/financials?ts_code=${encodeURIComponent(tsCode || '')}`)
+  )
+  ipcMain.handle('get-stock-moneyflow', async (_e, tsCode: string) =>
+    makeApiRequest(`/market/moneyflow?ts_code=${encodeURIComponent(tsCode || '')}`)
   )
 
   ipcMain.handle('get-auto-launch', () => {

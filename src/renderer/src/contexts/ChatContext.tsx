@@ -35,9 +35,13 @@ interface ChatContextType {
   clearMessages: () => void
   openTabs: SessionMeta[]
   activeSessionId: string | null
+  /** 当前是否为未落盘的草稿对话（尚未创建标签） */
+  isDraftSession: boolean
   openSession: (id: string) => Promise<void>
-  closeTab: (id: string) => void
+  archiveTab: (id: string) => void
   newSession: () => Promise<void>
+  /** 发送前确保已有真实会话；草稿态会创建并打开标签后返回 id */
+  ensureActiveSession: (seedTitle?: string) => Promise<string>
   refreshTabs: () => Promise<void>
 }
 
@@ -46,6 +50,8 @@ const ChatContext = createContext<ChatContextType | undefined>(undefined)
 const LEGACY_STORAGE_KEY = 'fin-agent-chat-history'
 const MIGRATION_FLAG = 'fin-agent-session-migrated'
 const OPEN_TABS_KEY = 'fin-agent-open-tabs'
+/** 未落盘草稿会话的内存 key，点「新对话」时使用，首次发消息再 createSession */
+const DRAFT_SESSION_KEY = '__draft__'
 
 /** 把 1.1.10 之前存在 localStorage 的单轨历史迁移为一个会话，仅执行一次。 */
 async function migrateLegacyHistory(): Promise<void> {
@@ -88,13 +94,18 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [ready, setReady] = useState(false)
   const messagesBySessionRef = useRef(messagesBySession)
   messagesBySessionRef.current = messagesBySession
+  const activeSessionIdRef = useRef(activeSessionId)
+  activeSessionIdRef.current = activeSessionId
+  const ensureSessionPromiseRef = useRef<Promise<string> | null>(null)
+
+  const isDraftSession = ready && !activeSessionId
 
   const messages =
     !ready
       ? []
-      : activeSessionId && messagesBySession[activeSessionId]
-        ? messagesBySession[activeSessionId]
-        : []
+      : activeSessionId
+        ? messagesBySession[activeSessionId] ?? []
+        : messagesBySession[DRAFT_SESSION_KEY] ?? []
 
   const refreshTabs = useCallback(async () => {
     const ids = readOpenTabIds()
@@ -120,10 +131,10 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const setMessages: React.Dispatch<MessagesUpdater> = useCallback(
     (action) => {
-      if (!activeSessionId) return
-      updateSessionMessages(activeSessionId, action)
+      const key = activeSessionIdRef.current ?? DRAFT_SESSION_KEY
+      updateSessionMessages(key, action)
     },
-    [activeSessionId, updateSessionMessages]
+    [updateSessionMessages]
   )
 
   const openSession = useCallback(
@@ -149,19 +160,54 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     [persistOpenTabIds, refreshTabs]
   )
 
+  /** 进入空白草稿态：不 createSession、不增加标签 */
   const newSession = useCallback(async () => {
-    const meta = await window.api.createSession()
-    await openSession(meta.id)
-  }, [openSession])
+    setMessagesBySession((prev) => {
+      if (prev[DRAFT_SESSION_KEY] === undefined) return prev
+      const next = { ...prev }
+      delete next[DRAFT_SESSION_KEY]
+      return next
+    })
+    setActiveSessionId(null)
+  }, [])
 
-  const closeTab = useCallback(
+  const ensureActiveSession = useCallback(
+    async (seedTitle?: string) => {
+      const current = activeSessionIdRef.current
+      if (current) return current
+      if (ensureSessionPromiseRef.current) return ensureSessionPromiseRef.current
+
+      ensureSessionPromiseRef.current = (async () => {
+        const title = (seedTitle || '').trim().slice(0, 40) || undefined
+        const meta = await window.api.createSession(title)
+        const draft = messagesBySessionRef.current[DRAFT_SESSION_KEY] ?? []
+        setMessagesBySession((prev) => {
+          const next = { ...prev }
+          delete next[DRAFT_SESSION_KEY]
+          next[meta.id] = draft
+          return next
+        })
+        await openSession(meta.id)
+        return meta.id
+      })()
+
+      try {
+        return await ensureSessionPromiseRef.current
+      } finally {
+        ensureSessionPromiseRef.current = null
+      }
+    },
+    [openSession]
+  )
+
+  const archiveTab = useCallback(
     (id: string) => {
       const ids = readOpenTabIds().filter((x) => x !== id)
       persistOpenTabIds(ids)
       const snapshot = messagesBySessionRef.current[id]
       if (snapshot) {
         void window.api.saveSessionUi(id, snapshot).catch((err) => {
-          console.error('[ChatContext] Failed to persist before close:', err)
+          console.error('[ChatContext] Failed to persist before archive:', err)
         })
       }
       setMessagesBySession((prev) => {
@@ -170,20 +216,21 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return next
       })
       void refreshTabs()
-      if (activeSessionId === id) {
+      if (activeSessionIdRef.current === id) {
         if (ids.length > 0) {
           void openSession(ids[ids.length - 1])
         } else {
+          // 关掉最后一个标签 → 回到草稿，不立刻建空会话
           void newSession()
         }
       }
     },
-    [activeSessionId, newSession, openSession, persistOpenTabIds, refreshTabs]
+    [newSession, openSession, persistOpenTabIds, refreshTabs]
   )
 
-  // 所有内存中的会话消息防抖落盘（含后台流式标签）
+  // 所有内存中的会话消息防抖落盘（含后台流式标签）；草稿不落盘
   useEffect(() => {
-    const entries = Object.entries(messagesBySession)
+    const entries = Object.entries(messagesBySession).filter(([id]) => id !== DRAFT_SESSION_KEY)
     if (entries.length === 0) return undefined
     const timer = setTimeout(() => {
       for (const [id, msgs] of entries) {
@@ -195,7 +242,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return () => clearTimeout(timer)
   }, [messagesBySession])
 
-  // 启动：迁移旧数据 → 恢复上次打开的标签 → 没有则新建；完成后再渲染页面，避免欢迎页闪一下
+  // 启动：迁移旧数据 → 恢复上次打开的标签 → 没有则进草稿；完成后再渲染页面，避免欢迎页闪一下
   useEffect(() => {
     void (async () => {
       try {
@@ -232,8 +279,9 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const clearMessages = () => {
     setMessages([])
-    if (activeSessionId) {
-      void window.api.saveSessionUi(activeSessionId, [])
+    const id = activeSessionIdRef.current
+    if (id) {
+      void window.api.saveSessionUi(id, [])
     }
   }
 
@@ -251,9 +299,11 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         clearMessages,
         openTabs,
         activeSessionId,
+        isDraftSession,
         openSession,
-        closeTab,
+        archiveTab,
         newSession,
+        ensureActiveSession,
         refreshTabs
       }}
     >

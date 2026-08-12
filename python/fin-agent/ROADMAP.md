@@ -1,0 +1,134 @@
+# Roadmap - Fin-Agent
+
+本项目旨在打造一个全能的智能金融分析助手。以下是项目未来的发展规划和功能路线图。
+
+## 🎯 阶段一：基础能力建设 (v0.1.x) [已完成]
+
+- [x] **LLM 接入**：集成 DeepSeek API，实现基本的自然语言交互。
+- [x] **数据接入**：集成 Tushare Pro 接口，实现基础数据的获取。
+- [x] **核心工具集**：
+    - [x] 基础信息查询 (`get_stock_basic`)
+    - [x] 实时行情 (`get_realtime_price`)
+    - [x] 历史行情 (`get_daily_price`)
+    - [x] 财务报表 (`get_income_statement`)
+    - [x] 估值指标 (`get_daily_basic`)
+- [x] **配置管理**：支持 `.env` 文件及交互式配置向导。
+- [x] **CLI 交互**：提供基于命令行的交互界面。
+
+## 🚀 阶段二：增强市场洞察 (v0.2.x) [已完成]
+
+- [x] **大盘与板块**：
+    - [x] 指数行情 (`get_index_daily`)
+    - [x] 概念板块查询 (`get_concept_detail`)
+- [x] **资金流向分析**：
+    - [x] 个股资金流 (`get_moneyflow`)
+    - [x] 北向资金 (`get_hsgt_top10`)
+    - [x] 龙虎榜数据 (`get_top_list`)
+- [x] **市场情绪监控**：
+    - [x] 每日涨跌停列表 (`get_limit_list`)
+    - [x] 业绩预告筛选 (`get_forecast`)
+
+## 🛠️ 阶段三：架构升级与高级分析 (v0.3.x - v0.4.x) [已完成]
+
+- [x] **多模型接入 (Multi-LLM Support)**：
+    - [x] 抽象 LLM 接口层，支持配置切换不同模型。
+    - [x] 接入国内大模型 (Kimi, 智谱 GLM-4, 阿里 Qwen)。
+    - [x] 支持本地模型 (通过 Ollama 接入 Llama 3, Mistral)。
+    - [x] OpenRouter (Gemini3, claude-sonnet-4.5, GPT5.2)。
+
+- [x] **技术指标计算**：
+    - [x] 内置常见指标计算 (MACD, RSI, KDJ, BOLL)。
+    - [x] 自动识别技术形态 (如“金叉”、“底背离”)。
+- [x] **智能选股器**：
+    - [x] 支持自然语言选股 ("选出市盈率小于 10 且最近一周主力净流入的股票")。
+    - [x] 基于策略的回测功能 (Backtesting)。
+- [x] **投资组合管理**：
+    - [x] 模拟持仓管理。
+    - [x] 组合风险评估与再平衡建议。
+
+## 🧠 阶段四：智能化进阶与深度投研 (v0.5.x - v0.9.x) [进行中]
+
+- [x] **自动化与个性化助理 (Automation & Personalization)**
+    - [x] 支持定时任务。
+    - [x] 自定义条件监控与即时消息推送。
+    - [x] 用户投资风格画像与偏好记忆 (Long-term Memory)。
+
+- [x] **智能记忆与上下文管理 (Smart Memory & Context)**
+    - [x] 多轮对话上下文保持 (Multi-turn Context)。
+    - [x] 历史对话摘要与跨会话记忆 (Session Summary & Recall)。
+
+- [x] **长尾低关注度股票挖掘 (Long-tail/Neglected Stock Discovery)**
+    - [x] 筛选低机构持仓、低研报覆盖但基本面优秀的“冷门股”。
+    - [x] 监控长期横盘后的异常放量与资金异动。
+    - [x] 挖掘细分行业隐形冠军与被低估的烟蒂股。
+
+- [x] **全资产覆盖与宏观视角 (Multi-Asset & Macro)**
+    - [x] **港股行情支持**：接入港股市场数据，支持港股实时行情、历史行情查询。
+    - [x] **美股行情支持**：接入美股市场数据，支持美股实时行情、历史行情查询。
+    - [x] **ETF数据支持**：扩展ETF基本信息查询和日线行情数据 (`get_etf_basic`, `get_etf_daily_price`)。
+    - [x] **可转债数据支持**：扩展可转债基本信息查询和日线行情数据 (`get_cb_basic`, `get_cb_daily_price`)。
+    - [x] **期货数据支持**：扩展期货合约基本信息查询和日线行情数据 (`get_futures_basic`, `get_futures_daily_price`)。
+    - [x] **宏观经济数据**：接入宏观经济数据工具 (`get_macro_gdp`, `get_macro_cpi`, `get_macro_m2`, `get_macro_interest_rate`)，支持GDP、CPI、M2、利率等数据查询。
+    - [x] **全球市场指数对比**：实现全球市场指数对比工具 (`get_global_index_comparison`)，支持多市场指数数据对比分析。
+
+- [ ] **量化因子挖掘与回测实验室 (Quant Factor Lab)**
+    - [ ] 支持自定义因子表达式与多因子选股模型。
+    - [ ] 提供常用的量化策略模板 (网格交易、趋势跟随等)。
+    - [ ] 策略参数优化与历史回测报告生成。
+
+
+- [ ] **行业产业链图谱与竞争分析 (Industry Knowledge Graph)**
+    - [ ] 构建行业上下游产业链知识图谱。
+    - [ ] 杜邦分析法与同行业公司财务对比 (Peer Comparison)。
+    - [ ] 行业周期判断与景气度追踪。
+
+- [ ] **交易复盘与行为金融分析 (Behavioral Analysis)**
+    - [ ] 导入历史交割单进行全面复盘。
+    - [ ] 分析用户交易行为偏好 (胜率、盈亏比、持仓时间)。
+    - [ ] 提供基于行为金融学的改进建议 (如“止损不坚决”、“频繁交易”)。
+
+
+## 🌐 阶段五：平台化与交互升级 (v1.0.0+)
+
+- [ ] **多模态分析 (进阶)**：
+    - [ ] 支持上传 K 线图截图进行技术面分析。
+
+## 暂不纳入但未来可能要做的
+
+- [ ] **研报知识库与 RAG (Research RAG)**
+    - [ ] 支持研报 PDF 文档的解析与向量化存储。
+    - [ ] 基于 RAG (检索增强生成) 的深度问答。
+    - [ ] 自动生成行业研究报告摘要。
+
+- [ ] **舆情洞察与资讯聚合 (News & Sentiment)**
+    - [ ] 接入主流财经新闻源 (新浪、东方财富等)。
+    - [ ] LLM 实时新闻摘要与情感倾向打分 (Positive/Negative/Neutral)。
+    - [ ] 基于舆情的板块热点挖掘与异动监控。
+
+- [ ] **多模型接入 (Multi-LLM Support)**：
+    - [ ] 接入 OpenAI (GPT-4/3.5), Anthropic (Claude 3)。
+
+- [ ] **插件系统**：
+    - [ ] 允许第三方开发者开发自定义数据源或分析工具。
+
+- [ ] **多智能体协同专家系统 (Multi-Agent Expert System)**
+    - [ ] 构建数据员、分析师、风控官、基金经理等不同角色的 Agent。
+    - [ ] 实现多 Agent 之间的辩论、验证与协作决策模式。
+    - [ ] 复杂任务的自动拆解与分发执行。
+
+- [ ] **语音交互与播客生成 (Voice & Audio Report)**
+    - [ ] 支持语音输入指令进行交互。
+    - [ ] 将研报或日报转换为播客音频 (TTS)，支持车载模式。
+    - [ ] 每日早报/晚报的音频自动推送到手机。
+
+- [ ] **智能记忆与上下文管理 (Smart Memory & Context)**
+    - [ ] 引入向量数据库 (Vector DB) 实现长期记忆。
+
+## 📝 贡献与反馈
+
+欢迎社区成员提出新的想法和建议！您可以：
+1. 在 GitHub Issues 中提交 Feature Request。
+2. Fork 本项目并提交 Pull Request。
+
+---
+*Last Updated: 2025-12-15*

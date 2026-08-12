@@ -5,6 +5,7 @@ import ConfigView from './components/ConfigView'
 import AboutView from './components/AboutView'
 import PortfolioView from './components/PortfolioView'
 import NewsView from './components/NewsView'
+import StockDetailView from './components/StockDetailView'
 import ToastView from './components/ToastView'
 import UpdateToastView from './components/UpdateToastView'
 import QuitConfirmModal from './components/QuitConfirmModal'
@@ -62,6 +63,7 @@ function App(): JSX.Element {
         <Route path="/about" element={<AboutView />} />
         <Route path="/portfolio" element={<PortfolioView />} />
         <Route path="/news" element={<NewsView />} />
+        <Route path="/stock/:tsCode" element={<StockDetailView />} />
         <Route path="/toast" element={<ToastView />} />
         <Route path="/update-toast" element={<UpdateToastView />} />
         <Route path="/" element={<InputView />} /> {/* Default to input if no hash */}

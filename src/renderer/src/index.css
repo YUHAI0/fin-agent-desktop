@@ -9,10 +9,16 @@
 [data-theme='dark'] {
   --fa-bg: #0a0a0a;
   --fa-sidebar: #121212;
-  --fa-sidebar-glass: rgba(18, 18, 18, 0.78);
+  --fa-sidebar-glass: rgba(18, 18, 18, 0.88);
   --fa-sidebar-glass-border: rgba(255, 255, 255, 0.06);
   --fa-sidebar-glass-highlight: rgba(255, 255, 255, 0.07);
   --fa-sidebar-active: rgba(255, 255, 255, 0.09);
+  --fa-sidebar-text: #f3f4f6;
+  --fa-sidebar-muted: #c8c8c8;
+  --fa-sidebar-faint: #9ca3af;
+  --fa-sidebar-active-bg: rgba(245, 158, 11, 0.14);
+  --fa-sidebar-active-text: #fef3c7;
+  --fa-sidebar-hover-bg: rgba(255, 255, 255, 0.06);
   --fa-titlebar: #121212;
   /* 仅纵向高光：侧栏与顶栏并排时不会在接缝处重新起色 */
   --fa-glass-stack: linear-gradient(
@@ -49,6 +55,14 @@
   --fa-scrollbar: rgb(70 70 70 / 0.5);
   --fa-scrollbar-hover: rgb(100 100 100 / 0.75);
   --fa-stripe: rgba(255, 255, 255, 0.02);
+  --fa-table-bg: #1c1c1f;
+  --fa-table-header-bg: rgba(245, 158, 11, 0.18);
+  --fa-table-header-text: #fde68a;
+  --fa-table-border: rgba(245, 158, 11, 0.28);
+  --fa-table-row-border: rgba(255, 255, 255, 0.08);
+  --fa-table-label: #c8c8c8;
+  --fa-table-value: #f5f5f5;
+  --fa-table-stripe: rgba(255, 255, 255, 0.035);
   --fa-code-bg: rgba(255, 255, 255, 0.04);
   --fa-overlay: rgba(0, 0, 0, 0.55);
   --fa-composer-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04);
@@ -70,6 +84,12 @@
   --fa-sidebar-glass-border: rgba(9, 9, 11, 0.08);
   --fa-sidebar-glass-highlight: rgba(255, 255, 255, 0.95);
   --fa-sidebar-active: #ffffff;
+  --fa-sidebar-text: #18181b;
+  --fa-sidebar-muted: #3f3f46;
+  --fa-sidebar-faint: #52525b;
+  --fa-sidebar-active-bg: rgba(37, 99, 235, 0.1);
+  --fa-sidebar-active-text: #1d4ed8;
+  --fa-sidebar-hover-bg: rgba(9, 9, 11, 0.05);
   --fa-titlebar: #eceef1;
   --fa-glass-stack: linear-gradient(
       180deg,
@@ -104,6 +124,14 @@
   --fa-scrollbar: rgb(161 161 170 / 0.5);
   --fa-scrollbar-hover: rgb(113 113 122 / 0.7);
   --fa-stripe: rgba(9, 9, 11, 0.04);
+  --fa-table-bg: #ffffff;
+  --fa-table-header-bg: rgba(37, 99, 235, 0.1);
+  --fa-table-header-text: #1d4ed8;
+  --fa-table-border: rgba(37, 99, 235, 0.22);
+  --fa-table-row-border: #e4e4e7;
+  --fa-table-label: #3f3f46;
+  --fa-table-value: #18181b;
+  --fa-table-stripe: rgba(9, 9, 11, 0.03);
   --fa-code-bg: #f4f4f5;
   --fa-overlay: rgba(9, 9, 11, 0.4);
   --fa-composer-shadow: 0 0 0 1px rgba(9, 9, 11, 0.08), 0 4px 24px rgba(9, 9, 11, 0.07);
@@ -184,12 +212,8 @@ body {
 .prose td {
   @apply whitespace-nowrap border px-4 py-2.5 text-sm;
   border-color: var(--fa-border);
-  color: var(--fa-muted);
+  color: var(--fa-text);
   display: table-cell !important;
-}
-
-.prose tr {
-  display: table-row !important;
 }
 
 .prose tbody tr:hover {
@@ -198,6 +222,70 @@ body {
 
 .prose tbody tr:nth-child(even) {
   background: var(--fa-stripe);
+}
+
+/* 对话 Markdown 表格 — 高对比、表头 accent */
+.fa-md-table-wrap {
+  @apply my-4 w-full overflow-x-auto rounded-xl text-sm leading-7;
+  background: var(--fa-table-bg);
+  border: 1px solid var(--fa-table-border);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12);
+}
+
+.fa-md-table {
+  @apply w-full min-w-[280px] border-collapse;
+}
+
+.fa-md-table thead {
+  background: var(--fa-table-header-bg);
+}
+
+.fa-md-table-th {
+  @apply border-b px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wider whitespace-nowrap;
+  border-color: var(--fa-table-border);
+  color: var(--fa-table-header-text);
+}
+
+.fa-md-table-td {
+  @apply border-b px-4 py-2.5 text-sm whitespace-nowrap;
+  border-color: var(--fa-table-row-border);
+  color: var(--fa-table-value);
+  font-variant-numeric: tabular-nums;
+}
+
+.fa-md-table-td:first-child {
+  color: var(--fa-table-label);
+  font-weight: 500;
+}
+
+.fa-md-table-td:not(:first-child) {
+  font-weight: 600;
+}
+
+.fa-md-table-row {
+  @apply transition-colors duration-150;
+}
+
+.fa-md-table tbody .fa-md-table-row:nth-child(even) {
+  background: var(--fa-table-stripe);
+}
+
+.fa-md-table tbody .fa-md-table-row:hover {
+  background: var(--fa-surface-hover);
+}
+
+.fa-md-table-up {
+  color: var(--fa-candle-up) !important;
+  font-weight: 700 !important;
+}
+
+.fa-md-table-down {
+  color: var(--fa-candle-down) !important;
+  font-weight: 700 !important;
+}
+
+.prose tr {
+  display: table-row !important;
 }
 
 .prose-fa {
@@ -377,6 +465,68 @@ body {
     background: transparent;
     border-right: none;
     box-shadow: none;
+    overflow: hidden;
+    will-change: width;
+  }
+
+  .fa-sidebar-glass--animating {
+    transition: width 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .fa-sidebar-glass--dragging {
+    transition: none;
+  }
+
+  .fa-sidebar-inner {
+    height: 100%;
+    pointer-events: auto;
+  }
+
+  .fa-sidebar-glass[aria-hidden='true'] .fa-sidebar-inner {
+    pointer-events: none;
+  }
+
+  .fa-sidebar-collapse-btn {
+    @apply inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md;
+    color: var(--fa-sidebar-faint);
+    background: transparent;
+    transition: background 0.15s, color 0.15s;
+  }
+
+  .fa-sidebar-collapse-btn:hover {
+    color: var(--fa-sidebar-text);
+    background: var(--fa-sidebar-hover-bg);
+  }
+
+  [data-theme='light'] .fa-sidebar-collapse-btn:hover {
+    background: rgba(9, 9, 11, 0.06);
+  }
+
+  .fa-sidebar-resizer {
+    position: absolute;
+    top: 0;
+    right: -3px;
+    z-index: 5;
+    width: 6px;
+    height: 100%;
+    cursor: col-resize;
+    touch-action: none;
+  }
+
+  .fa-sidebar-resizer::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 2px;
+    width: 1px;
+    background: transparent;
+    transition: background 0.15s;
+  }
+
+  .fa-sidebar-resizer:hover::after,
+  .fa-sidebar-resizer:active::after {
+    background: color-mix(in srgb, var(--fa-accent) 55%, transparent);
   }
 
   /* 顶栏：透明内容层，与侧栏共用同一层玻璃 */
@@ -434,14 +584,14 @@ body {
   }
 
   .fa-sidebar-brand {
-    @apply flex min-w-0 shrink-0 items-center px-3;
+    @apply flex min-w-0 shrink-0 items-center px-2;
     height: var(--fa-titlebar-height);
     min-height: var(--fa-titlebar-height);
   }
 
   .fa-sidebar-brand-pill {
     @apply flex min-w-0 max-w-full items-center gap-1 rounded-lg px-2.5 py-1 text-[13px] font-medium;
-    color: var(--fa-text);
+    color: var(--fa-sidebar-text);
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 255, 255, 0.08);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
@@ -456,7 +606,7 @@ body {
   .fa-sidebar-brand-pill-icon {
     @apply flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[10px] font-semibold;
     background: rgba(255, 255, 255, 0.08);
-    color: var(--fa-text);
+    color: var(--fa-sidebar-text);
   }
 
   [data-theme='light'] .fa-sidebar-brand-pill-icon {
@@ -476,8 +626,8 @@ body {
   }
 
   .fa-sidebar-section-label {
-    @apply px-4 pb-2 pt-4 text-[11px] font-medium tracking-wide;
-    color: var(--fa-faint);
+    @apply px-4 pb-2 pt-4 text-[11px] font-semibold uppercase tracking-wider;
+    color: var(--fa-sidebar-faint);
   }
 
   .fa-shell-toolbar .fa-theme-toggle {
@@ -532,51 +682,54 @@ body {
   }
 
   .fa-sidebar-nav {
-    @apply flex w-full cursor-pointer items-center gap-2.5 rounded-[10px] px-3 py-2 text-[13px] transition-colors duration-200;
-    color: var(--fa-muted);
+    @apply flex w-full cursor-pointer items-center gap-2.5 rounded-[10px] border-l-2 border-transparent px-3 py-2 text-[13px] font-medium transition-colors duration-200;
+    color: var(--fa-sidebar-muted);
   }
 
   .fa-sidebar-nav:hover {
-    background: rgba(255, 255, 255, 0.05);
-    color: var(--fa-text);
+    background: var(--fa-sidebar-hover-bg);
+    color: var(--fa-sidebar-text);
   }
 
   [data-theme='light'] .fa-sidebar-nav:hover {
-    background: rgba(9, 9, 11, 0.04);
+    background: var(--fa-sidebar-hover-bg);
   }
 
   .fa-sidebar-nav-active {
-    background: var(--fa-sidebar-active);
-    color: var(--fa-text);
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+    background: var(--fa-sidebar-active-bg);
+    border-left: 2px solid var(--fa-accent);
+    color: var(--fa-sidebar-active-text);
+    box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.12);
   }
 
   [data-theme='light'] .fa-sidebar-nav-active {
-    box-shadow: 0 1px 2px rgba(9, 9, 11, 0.05), inset 0 0 0 1px rgba(9, 9, 11, 0.06);
+    box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.12);
   }
 
   .fa-sidebar-tab {
-    @apply mb-0.5 flex cursor-pointer items-center gap-1 rounded-[10px] px-3 py-2 text-[13px] transition-colors duration-200;
-    color: var(--fa-muted);
+    @apply mb-0.5 flex cursor-pointer items-center gap-1 rounded-[10px] border-l-2 border-transparent px-3 py-2 text-[13px] transition-colors duration-200;
+    color: var(--fa-sidebar-muted);
   }
 
   .fa-sidebar-tab:hover {
-    background: rgba(255, 255, 255, 0.05);
-    color: var(--fa-text);
+    background: var(--fa-sidebar-hover-bg);
+    color: var(--fa-sidebar-text);
   }
 
   [data-theme='light'] .fa-sidebar-tab:hover {
-    background: rgba(9, 9, 11, 0.04);
+    background: var(--fa-sidebar-hover-bg);
   }
 
   .fa-sidebar-tab-active {
-    background: var(--fa-sidebar-active);
-    color: var(--fa-text);
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+    background: var(--fa-sidebar-active-bg);
+    border-left-color: var(--fa-accent);
+    color: var(--fa-sidebar-active-text);
+    font-weight: 500;
+    box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.12);
   }
 
   [data-theme='light'] .fa-sidebar-tab-active {
-    box-shadow: 0 1px 2px rgba(9, 9, 11, 0.05), inset 0 0 0 1px rgba(9, 9, 11, 0.06);
+    box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.12);
   }
 
   .fa-hero {
@@ -910,39 +1063,70 @@ body {
 
   /* ── 应用内浮动通知 (Toast 窗口路由) ─────────────────────────────────────── */
   html.fa-toast-page,
-  html.fa-toast-page body {
-    background: transparent !important;
+  html.fa-toast-page body,
+  html.fa-toast-page #root {
+    background: #1e1f24 !important;
     margin: 0;
     padding: 0;
     overflow: hidden;
     user-select: none;
   }
 
+  html.fa-toast-page[data-theme='light'],
+  html.fa-toast-page[data-theme='light'] body,
+  html.fa-toast-page[data-theme='light'] #root {
+    background: #ffffff !important;
+  }
+
+  html.fa-update-toast-page,
+  html.fa-update-toast-page body,
+  html.fa-update-toast-page #root {
+    width: 100%;
+    height: 100%;
+  }
+
   .fa-toast-root {
-    position: fixed;
-    inset: 0;
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    width: 100%;
+    height: auto;
+    box-sizing: border-box;
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 10px;
     padding: 12px 14px;
     border-radius: 14px;
-    background: var(--fa-sidebar);
-    border: 1px solid var(--fa-border);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.28), 0 2px 8px rgba(0, 0, 0, 0.18);
-    color: var(--fa-text);
+    background: #1e1f24;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.25);
+    color: #f3f4f6;
     overflow: hidden;
-    opacity: 0;
-    transform: translateY(12px);
-    transition: opacity 0.22s ease, transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+    /* 窗口本身会滑入，卡片无需再淡入，避免空底闪现 */
+    opacity: 1;
+    transform: none;
+  }
+
+  .fa-toast-root[data-news='true'] {
+    padding: 12px 14px;
+  }
+
+  html[data-theme='light'] .fa-toast-root {
+    background: #ffffff;
+    border: 1px solid rgba(15, 23, 42, 0.12);
+    box-shadow: 0 8px 32px rgba(15, 23, 42, 0.18), 0 2px 8px rgba(15, 23, 42, 0.1);
+    color: #0f172a;
   }
 
   .fa-toast-root[data-visible='true'] {
     opacity: 1;
-    transform: translateY(0);
+    transform: none;
   }
 
   .fa-toast-icon-col {
     flex-shrink: 0;
+    padding-top: 1px;
   }
 
   .fa-toast-icon {
@@ -965,6 +1149,7 @@ body {
   .fa-toast-header {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 5px;
     margin-bottom: 2px;
   }
@@ -987,6 +1172,14 @@ body {
     color: var(--fa-muted);
   }
 
+  .fa-toast-sentiment {
+    font-size: 10px !important;
+    padding: 0 6px !important;
+    height: 16px;
+    line-height: 16px;
+    border-radius: 4px !important;
+  }
+
   .fa-toast-arrow {
     color: var(--fa-muted);
     opacity: 0.5;
@@ -1003,6 +1196,16 @@ body {
     text-overflow: ellipsis;
   }
 
+  .fa-toast-root[data-news='true'] .fa-toast-title {
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+    font-size: 13.5px;
+    line-height: 1.35;
+  }
+
   .fa-toast-body {
     font-size: 11.5px;
     color: var(--fa-muted);
@@ -1010,6 +1213,19 @@ body {
     overflow: hidden;
     text-overflow: ellipsis;
     margin-top: 1px;
+  }
+
+  .fa-toast-root[data-news='true'] .fa-toast-body {
+    white-space: pre-line;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 8;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 4px;
+    font-size: 12px;
+    line-height: 1.45;
+    color: color-mix(in srgb, var(--fa-text) 78%, var(--fa-muted));
   }
 
   .fa-toast-close {
@@ -1024,6 +1240,7 @@ body {
     background: transparent;
     transition: background 0.15s, color 0.15s;
     margin-left: 4px;
+    margin-top: 1px;
   }
 
   .fa-toast-close:hover {
@@ -1033,24 +1250,33 @@ body {
 
   /* ── 更新浮窗 (update-toast 路由) ─────────────────────────────────────────── */
   .fa-update-toast-root {
-    position: fixed;
-    inset: 0;
+    position: relative;
     display: flex;
     flex-direction: column;
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
     border-radius: 14px;
-    background: var(--fa-sidebar);
-    border: 1px solid var(--fa-border);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.28), 0 2px 8px rgba(0, 0, 0, 0.18);
-    color: var(--fa-text);
+    background: #1e1f24;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.25);
+    color: #f3f4f6;
     overflow: hidden;
-    opacity: 0;
-    transform: translateY(12px);
-    transition: opacity 0.22s ease, transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+    /* 窗口滑入即可，卡片不再淡入，避免空底闪一下 */
+    opacity: 1;
+    transform: none;
+  }
+
+  html[data-theme='light'] .fa-update-toast-root {
+    background: #ffffff;
+    border: 1px solid rgba(15, 23, 42, 0.12);
+    box-shadow: 0 8px 32px rgba(15, 23, 42, 0.18), 0 2px 8px rgba(15, 23, 42, 0.1);
+    color: #0f172a;
   }
 
   .fa-update-toast-root[data-visible='true'] {
     opacity: 1;
-    transform: translateY(0);
+    transform: none;
   }
 
   .fa-update-toast-header {
@@ -1084,23 +1310,90 @@ body {
   }
 
   .fa-update-toast-body {
-    flex: 1;
+    flex: 1 1 auto;
     min-height: 0;
     padding: 0 14px 8px;
     overflow-y: auto;
   }
 
+  .fa-update-toast-root[data-compact='true'] .fa-update-toast-body {
+    flex: 0 1 auto;
+    overflow: visible;
+  }
+
   .fa-update-toast-notes {
-    font-size: 11.5px;
-    line-height: 1.45;
+    font-size: 12px;
+    line-height: 1.5;
     color: var(--fa-muted);
-    max-height: 72px;
-    overflow-y: auto;
-    white-space: pre-wrap;
-    padding: 8px 10px;
-    border-radius: 8px;
-    background: var(--fa-bg);
-    border: 1px solid var(--fa-border);
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    /* 高度由窗口自适应；超长时在笔记区内滚动 */
+    max-height: none;
+    overflow: visible;
+  }
+
+  html[data-theme='light'] .fa-update-toast-notes {
+    background: rgba(15, 23, 42, 0.03);
+    border-color: rgba(15, 23, 42, 0.08);
+  }
+
+  .fa-update-toast-notes.prose {
+    color: var(--fa-muted);
+  }
+
+  .fa-update-toast-notes.prose :where(h1, h2, h3, h4) {
+    color: var(--fa-text);
+    font-weight: 600;
+    margin: 0.35em 0 0.25em;
+    line-height: 1.35;
+  }
+
+  .fa-update-toast-notes.prose :where(h1) {
+    font-size: 14px;
+  }
+
+  .fa-update-toast-notes.prose :where(h2) {
+    font-size: 13px;
+  }
+
+  .fa-update-toast-notes.prose :where(h3, h4) {
+    font-size: 12px;
+  }
+
+  .fa-update-toast-notes.prose :where(p) {
+    margin: 0.35em 0;
+  }
+
+  .fa-update-toast-notes.prose :where(ul, ol) {
+    margin: 0.35em 0;
+    padding-left: 1.2em;
+  }
+
+  .fa-update-toast-notes.prose :where(li) {
+    margin: 0.15em 0;
+  }
+
+  .fa-update-toast-notes.prose :where(strong) {
+    color: var(--fa-text);
+    font-weight: 600;
+  }
+
+  .fa-update-toast-notes.prose :where(a) {
+    color: var(--fa-accent);
+  }
+
+  .fa-update-toast-notes.prose :where(code) {
+    font-size: 11px;
+    padding: 0.1em 0.3em;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .fa-update-toast-notes.prose :where(hr) {
+    margin: 0.6em 0;
+    border-color: rgba(255, 255, 255, 0.08);
   }
 
   .fa-update-toast-progress {

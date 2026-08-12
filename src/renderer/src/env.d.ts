@@ -1,4 +1,9 @@
 // Add types for the new API methods
+declare module '*.png' {
+  const src: string
+  export default src
+}
+
 interface ConfigData {
     tushare_token: string
     provider: string
@@ -75,6 +80,100 @@ interface PositionPayload {
   cost: number
   bought_at?: string
   note?: string
+}
+
+type MarketApiCode = 'tushare_required' | 'unsupported' | 'not_found' | 'error'
+
+interface MarketApiResult<T> {
+  ok: boolean
+  data?: T
+  error?: string
+  code?: MarketApiCode | string
+}
+
+interface StockSearchItem {
+  ts_code: string
+  symbol?: string | null
+  name?: string | null
+  industry?: string | null
+  market?: string | null
+}
+
+interface StockQuote {
+  ts_code: string
+  name?: string | null
+  industry?: string | null
+  price?: number | null
+  pre_close?: number | null
+  change?: number | null
+  pct_chg?: number | null
+  vol?: number | null
+  amount?: number | null
+  open?: number | null
+  high?: number | null
+  low?: number | null
+  close?: number | null
+  trade_date?: string | null
+}
+
+interface StockCandle {
+  time: string
+  open: number
+  high: number
+  low: number
+  close: number
+  volume?: number | null
+}
+
+interface StockPerformance {
+  w1?: number | null
+  m1?: number | null
+  m3?: number | null
+  ytd?: number | null
+}
+
+interface StockKlineData {
+  ts_code: string
+  period: string
+  candles: StockCandle[]
+  performance?: StockPerformance
+}
+
+interface StockValuation {
+  ts_code?: string
+  trade_date?: string | null
+  pe?: number | null
+  pe_ttm?: number | null
+  pb?: number | null
+  ps_ttm?: number | null
+  dv_ratio?: number | null
+  total_mv?: number | null
+  circ_mv?: number | null
+}
+
+interface StockFinancialRow {
+  ts_code?: string
+  end_date?: string | null
+  total_revenue?: number | null
+  revenue?: number | null
+  operate_profit?: number | null
+  total_profit?: number | null
+  n_income?: number | null
+}
+
+interface StockMoneyflowRow {
+  ts_code?: string
+  trade_date?: string | null
+  buy_sm_amount?: number | null
+  sell_sm_amount?: number | null
+  buy_md_amount?: number | null
+  sell_md_amount?: number | null
+  buy_lg_amount?: number | null
+  sell_lg_amount?: number | null
+  buy_elg_amount?: number | null
+  sell_elg_amount?: number | null
+  net_mf_amount?: number | null
+  [key: string]: unknown
 }
 
 type NewsSubscriptionType = 'sector' | 'topic' | 'portfolio'
@@ -277,10 +376,34 @@ declare interface Window {
     addPosition: (payload: PositionPayload) => Promise<{ success: boolean; error?: string }>
     updatePosition: (payload: PositionPayload) => Promise<{ success: boolean; error?: string }>
     deletePosition: (id: string | undefined, tsCode: string) => Promise<{ success: boolean; error?: string }>
+    searchStocks: (q: string) => Promise<MarketApiResult<StockSearchItem[]>>
+    getStockQuote: (tsCode: string) => Promise<MarketApiResult<StockQuote>>
+    getStockKline: (tsCode: string, period?: string) => Promise<MarketApiResult<StockKlineData>>
+    getStockValuation: (tsCode: string) => Promise<MarketApiResult<StockValuation>>
+    getStockFinancials: (tsCode: string) => Promise<MarketApiResult<StockFinancialRow[]>>
+    getStockMoneyflow: (tsCode: string) => Promise<MarketApiResult<StockMoneyflowRow[]>>
     setTitleBarTheme: (theme: 'dark' | 'light') => Promise<void>
     platform: string
     getPendingUpdate: () => Promise<UpdateInfo | null>
-    startUpdateDownload: () => Promise<{ success?: boolean; error?: string }>
+    checkForUpdates: () => Promise<UpdateCheckResult>
+    resizeUpdateToast: (height: number) => Promise<{ success: boolean; height?: number }>
+    updateToastReady: () => void
+    resizeToast: (height: number) => Promise<{ success: boolean; height?: number }>
+    setToastChrome: (theme?: string) => Promise<{ success: boolean; background?: string }>
+    getPendingToast: () => Promise<{
+      _title: string
+      _body: string
+      type?: string
+      news_id?: string | null
+      subscription_id?: string | null
+      task_id?: string
+      ts_code?: string
+      _winId?: number
+    } | null>
+    toastClick: () => void
+    toastClose: () => void
+    toastShown: () => void
+    startUpdateDownload: () => Promise<{ success?: boolean; error?: string; cancelled?: boolean }>
     installUpdate: () => Promise<{ success?: boolean; error?: string }>
     updateToastDismiss: () => void
     onUpdateAvailable: (cb: (info: UpdateInfo) => void) => () => void
@@ -310,3 +433,9 @@ interface UpdateInfo {
   fileName: string
   releaseNotes: string
 }
+
+type UpdateCheckResult =
+  | { status: 'available'; version: string; currentVersion: string }
+  | { status: 'uptodate'; version: string; currentVersion: string }
+  | { status: 'no_asset'; version: string; currentVersion: string }
+  | { status: 'error'; error: string }

@@ -1,15 +1,20 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { flushSync } from 'react-dom'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Settings, ChevronDown, ChevronRight, Check, Loader2, Terminal, Bell, Briefcase, Newspaper, ArrowUp, Square, Brain, Sun, Moon, Sparkles } from 'lucide-react'
+import { Settings, ChevronDown, ChevronRight, Check, Loader2, Terminal, Bell, Briefcase, Newspaper, ArrowUp, Square, Brain, Sun, Moon, Sparkles, Search, PanelLeft } from 'lucide-react'
 import { useChat, ChatBlock, Message } from '../contexts/ChatContext'
 import { useTheme } from '../contexts/ThemeContext'
 import { KlinePanel } from './KlinePanel'
 import { BacktestEquityPanel } from './BacktestEquityPanel'
 import { ReminderTasksModal } from './ReminderTasksModal'
-import SessionTabs from './SessionTabs'
+import StockSearchModal from './StockSearchModal'
+import SessionTabs, {
+  SIDEBAR_DEFAULT_WIDTH,
+  SIDEBAR_MAX_WIDTH,
+  SIDEBAR_MIN_WIDTH
+} from './SessionTabs'
 import HistoryDrawer from './HistoryDrawer'
 import { parseToolResultToKline } from '../utils/parseToolOhlc'
 import { parseRunBacktestEquity } from '../utils/parseToolBacktest'
@@ -17,6 +22,7 @@ import { getQuickReplyOptions, stripFinAgentChoicesForDisplay } from '../utils/e
 import { getDefaultQuickReplyOptions, normalizeSessionMessages } from '../utils/welcomeAgentMessage'
 import { parseMaLadder } from '../utils/parseMaLadder'
 import { MaLadderPanel } from './MaLadderPanel'
+import { toolDisplayName } from '../utils/toolDisplayName'
 
 // ToolExecutionBlock type helper
 type ToolExecutionBlock = Extract<ChatBlock, { type: 'tool_execution' }>
@@ -68,7 +74,7 @@ const ToolExecutionView: React.FC<{ block: ToolExecutionBlock }> = ({ block }) =
           )}
         </div>
         <div className="flex flex-1 items-center gap-2 truncate font-mono text-xs text-[var(--fa-text)]">
-          <span className="font-semibold text-[var(--fa-accent)]">执行 {block.name}</span>
+          <span className="font-semibold text-[var(--fa-accent)]">{toolDisplayName(block.name)}</span>
           <span className="truncate text-[var(--fa-muted)]">{block.args.substring(0, 50)}</span>
         </div>
         <div className="text-[var(--fa-faint)]">
@@ -124,43 +130,41 @@ function flattenPreChildren(node: React.ReactNode): string {
   return ''
 }
 
+function tableCellClass(children: React.ReactNode): string {
+  const text = flattenPreChildren(children).trim()
+  if (/^\+/.test(text) && /%/.test(text)) return 'fa-md-table-td fa-md-table-up'
+  if (/^-/.test(text) && /%/.test(text)) return 'fa-md-table-td fa-md-table-down'
+  return 'fa-md-table-td'
+}
+
 // 表格组件配置：跟随 CSS 主题变量（昼夜模式一致）
 const markdownComponents = {
   /** not-prose：避免 typography 把 table 缩成比正文更小；字号与外层 prose-sm 段落对齐 */
   table: ({ children, ...props }: any) => (
-    <div className="not-prose my-4 w-full overflow-x-auto rounded-xl border border-[var(--fa-border)] bg-[var(--fa-surface)] text-sm leading-7 shadow-sm">
-      <table {...props} className="w-full min-w-[640px] border-collapse">
+    <div className="not-prose fa-md-table-wrap">
+      <table {...props} className="fa-md-table">
         {children}
       </table>
     </div>
   ),
   thead: ({ children, ...props }: any) => (
-    <thead {...props} className="bg-[var(--fa-surface-hover)]">
+    <thead {...props}>
       {children}
     </thead>
   ),
   tbody: ({ children, ...props }: any) => <tbody {...props}>{children}</tbody>,
   th: ({ children, ...props }: any) => (
-    <th
-      {...props}
-      className="border-b border-[var(--fa-border)] px-4 py-2.5 text-left text-sm font-semibold leading-7 text-[var(--fa-text)] whitespace-nowrap"
-    >
+    <th {...props} className="fa-md-table-th">
       {children}
     </th>
   ),
   td: ({ children, ...props }: any) => (
-    <td
-      {...props}
-      className="border-b border-[var(--fa-border-subtle)] px-4 py-2.5 text-sm font-normal leading-7 text-[var(--fa-text)] whitespace-nowrap"
-    >
+    <td {...props} className={tableCellClass(children)}>
       {children}
     </td>
   ),
   tr: ({ children, ...props }: any) => (
-    <tr
-      {...props}
-      className="transition-colors duration-150 even:bg-[var(--fa-stripe)] hover:bg-[var(--fa-surface-hover)]"
-    >
+    <tr {...props} className="fa-md-table-row">
       {children}
     </tr>
   ),
@@ -178,9 +182,28 @@ const markdownComponents = {
   }
 }
 
+const SIDEBAR_STORAGE_KEY = 'fin-agent-sidebar'
+
+function readSidebarPrefs(): { width: number; collapsed: boolean } {
+  try {
+    const raw = localStorage.getItem(SIDEBAR_STORAGE_KEY)
+    if (!raw) return { width: SIDEBAR_DEFAULT_WIDTH, collapsed: false }
+    const parsed = JSON.parse(raw) as { width?: unknown; collapsed?: unknown }
+    const width =
+      typeof parsed.width === 'number'
+        ? Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, parsed.width))
+        : SIDEBAR_DEFAULT_WIDTH
+    return { width, collapsed: Boolean(parsed.collapsed) }
+  } catch {
+    return { width: SIDEBAR_DEFAULT_WIDTH, collapsed: false }
+  }
+}
+
 const ChatView: React.FC = () => {
   const navigate = useNavigate()
-  const { messages, setMessages, updateSessionMessages, activeSessionId } = useChat() // 使用 Context 中的消息历史
+  const [searchParams] = useSearchParams()
+  const { messages, setMessages, updateSessionMessages, activeSessionId, ensureActiveSession } =
+    useChat() // 使用 Context 中的消息历史
   const { theme, setTheme } = useTheme()
   const [input, setInput] = useState('')
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -189,12 +212,28 @@ const ChatView: React.FC = () => {
   const [version, setVersion] = useState('...')
   const [autoScroll, setAutoScroll] = useState(true)
   const [reminderModalOpen, setReminderModalOpen] = useState(false)
+  const [stockSearchOpen, setStockSearchOpen] = useState(false)
   const [newsUnreadCount, setNewsUnreadCount] = useState(0)
+  const [sidebarWidth, setSidebarWidth] = useState(() => readSidebarPrefs().width)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readSidebarPrefs().collapsed)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const activeSessionIdRef = useRef(activeSessionId)
   activeSessionIdRef.current = activeSessionId
+  const ensureActiveSessionRef = useRef(ensureActiveSession)
+  ensureActiveSessionRef.current = ensureActiveSession
+
+  useEffect(() => {
+    localStorage.setItem(
+      SIDEBAR_STORAGE_KEY,
+      JSON.stringify({ width: sidebarWidth, collapsed: sidebarCollapsed })
+    )
+  }, [sidebarWidth, sidebarCollapsed])
+
+  const toggleSidebarCollapsed = () => setSidebarCollapsed((v) => !v)
+  const collapseSidebar = () => setSidebarCollapsed(true)
+  const expandSidebar = () => setSidebarCollapsed(false)
 
   const applyToSession = (
     sessionId: string | undefined,
@@ -205,6 +244,7 @@ const ChatView: React.FC = () => {
     } else if (activeSessionIdRef.current) {
       updateSessionMessages(activeSessionIdRef.current, updater)
     } else {
+      // 草稿态：写入草稿消息桶
       setMessages(updater)
     }
   }
@@ -296,6 +336,13 @@ const ChatView: React.FC = () => {
     }
   }, [])
 
+  // 从通知跳转 /chat?reminders=1 时，确保提醒列表打开（避免事件早于挂载丢失）
+  useEffect(() => {
+    if (searchParams.get('reminders') !== '1') return
+    setReminderModalOpen(true)
+    navigate('/chat', { replace: true })
+  }, [searchParams, navigate])
+
   useEffect(() => {
     const applyToSession = (
       sessionId: string | undefined,
@@ -309,14 +356,29 @@ const ChatView: React.FC = () => {
       const text = typeof payload === 'string' ? payload : payload?.text
       const sessionId = typeof payload === 'string' ? undefined : payload?.sessionId
       console.log('[ChatView] Received new-message:', text, sessionId)
-      if (text) {
-        applyToSession(sessionId, (prev) => [...prev, { role: 'user', content: text, blocks: [] }])
-        markResponding(sessionId, true)
-        if (isActiveSession(sessionId)) {
+      if (!text) return
+
+      const routeMessage = (sid?: string) => {
+        applyToSession(sid, (prev) => [...prev, { role: 'user', content: text, blocks: [] }])
+        markResponding(sid, true)
+        if (isActiveSession(sid)) {
           setIsTyping(true)
         }
-        // Don't create assistant message yet - wait for first stream event
       }
+
+      // 快捷输入等路径可能不带 sessionId；草稿态先建会话再入消息，避免空标签缺失
+      if (!sessionId && !activeSessionIdRef.current) {
+        void ensureActiveSessionRef
+          .current(text)
+          .then((sid) => routeMessage(sid))
+          .catch((err) => {
+            console.error('[ChatView] ensureActiveSession on new-message failed:', err)
+            routeMessage(undefined)
+          })
+        return
+      }
+
+      routeMessage(sessionId)
     })
 
     const removeBotStreamListener = window.api.onBotStream((data: any) => {
@@ -702,9 +764,18 @@ const ChatView: React.FC = () => {
       return
     }
 
-    window.api.submitInput(trimmed, activeSessionId ?? undefined)
+    // 草稿态：用户真正输入后再创建会话标签，避免空对话堆叠
+    let sessionId = activeSessionId ?? undefined
+    try {
+      sessionId = await ensureActiveSession(trimmed)
+    } catch (err) {
+      console.error('[ChatView] ensureActiveSession failed:', err)
+      return
+    }
+
+    window.api.submitInput(trimmed, sessionId)
     setInput('')
-    markResponding(activeSessionId ?? undefined, true)
+    markResponding(sessionId, true)
     setTimeout(() => {
       inputRef.current?.focus()
       setAutoScroll(true)
@@ -748,10 +819,30 @@ const ChatView: React.FC = () => {
       <div className="fa-app-shell-bg" aria-hidden />
       {/* 整窗一层连续玻璃：侧栏 + 顶栏无接缝 */}
       <div className="fa-chrome-glass" aria-hidden />
-      <SessionTabs onOpenDrawer={() => setDrawerOpen(true)} />
+      <SessionTabs
+        onOpenDrawer={() => setDrawerOpen(true)}
+        width={sidebarWidth}
+        collapsed={sidebarCollapsed}
+        onToggleCollapsed={toggleSidebarCollapsed}
+        onWidthChange={setSidebarWidth}
+        onCollapse={collapseSidebar}
+      />
 
       <div className="fa-shell-main">
         <header className="fa-shell-toolbar fa-titlebar-row fa-titlebar-row--reserve-end">
+          <div className="mr-auto flex items-center gap-0.5">
+            {sidebarCollapsed && (
+              <button
+                type="button"
+                onClick={expandSidebar}
+                className="fa-icon-btn focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--fa-accent)]"
+                title="展开侧栏"
+                aria-label="展开侧栏"
+              >
+                <PanelLeft size={18} strokeWidth={1.75} />
+              </button>
+            )}
+          </div>
           <div className="flex items-center gap-0.5">
             <div className="fa-theme-toggle" role="group" aria-label="主题切换">
               <button
@@ -777,6 +868,15 @@ const ChatView: React.FC = () => {
                 <Moon size={15} strokeWidth={theme === 'dark' ? 2.25 : 2} />
               </button>
             </div>
+            <button
+              type="button"
+              onClick={() => setStockSearchOpen(true)}
+              className="fa-icon-btn focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--fa-accent)]"
+              title="搜索股票"
+              aria-label="搜索股票"
+            >
+              <Search size={18} />
+            </button>
             <button
               type="button"
               onClick={() => setReminderModalOpen(true)}
@@ -831,6 +931,7 @@ const ChatView: React.FC = () => {
 
         <div className="fa-main-panel">
         <ReminderTasksModal open={reminderModalOpen} onClose={() => setReminderModalOpen(false)} />
+        <StockSearchModal open={stockSearchOpen} onClose={() => setStockSearchOpen(false)} />
 
         {/* 空状态 hero 或消息流 */}
         {showWelcomeHero ? (

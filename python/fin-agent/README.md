@@ -1,0 +1,252 @@
+# Fin-Agent: 智能金融分析助手
+
+<div align="center">
+
+[![Website](https://img.shields.io/badge/Website-fin--agent.chat-blue?style=flat-square)](https://www.fin-agent.chat/)
+[![PyPI version](https://img.shields.io/pypi/v/fin-agent.svg?style=flat-square)](https://pypi.org/project/fin-agent/)
+[![Python Versions](https://img.shields.io/pypi/pyversions/fin-agent.svg?style=flat-square)](https://pypi.org/project/fin-agent/)
+[![License](https://img.shields.io/github/license/YUHAI0/fin-agent.svg?style=flat-square)](https://github.com/YUHAI0/fin-agent/blob/main/LICENSE)
+[![Repo Size](https://img.shields.io/github/repo-size/YUHAI0/fin-agent.svg?style=flat-square)](https://github.com/YUHAI0/fin-agent)
+[![Last Commit](https://img.shields.io/github/last-commit/YUHAI0/fin-agent.svg?style=flat-square)](https://github.com/YUHAI0/fin-agent/commits/main)
+[![Star this repo](https://img.shields.io/github/stars/YUHAI0/fin-agent?style=social&label=Star)](https://github.com/YUHAI0/fin-agent)
+
+</div>
+
+> 🎉 **桌面版已发布！** 想要更便捷的使用体验？[**点击前往 Fin-Agent Desktop**](https://github.com/YUHAI0/fin-agent-desktop) - 基于 Electron 的图形界面版本，功能更强大，操作更简单！
+
+Fin-Agent 是一个基于 **DeepSeek** 等大模型和 **Tushare** 金融数据的智能金融分析助手。它能够通过自然语言交互，帮助用户查询股票行情、分析财务数据、获取**宏观数据**、市场指标、**选股筛选**以及**策略回测**，并提供投资参考建议。
+
+**全新升级**：
+- 🔔 **股价预警**：支持自然语言设置涨跌幅提醒，即时推送到邮箱。
+- 📊 **投资组合**：支持模拟持仓管理与即时盈亏统计。
+- 👤 **用户画像**：自动记忆投资风格（如保守/激进）、偏好板块等，提供个性化建议。
+- 🔍 **智能选股**：通过自然语言描述选股条件，AI 自动筛选符合条件的股票。**特别强调长尾选股功能**，能够挖掘被市场忽视的潜力标的，发现隐藏的投资机会。
+
+## ✨ 主要功能
+
+- **自然语言交互**：直接使用中文与 AI 对话，无需记忆复杂的命令或代码。
+- **智能诊断**：结合 LLM 的分析能力，对获取的数据进行解读和总结。
+- **全面的 Tushare 支持**：覆盖个股、大盘、**宏观数据**（GDP、CPI、M2、利率）、资金、财务、热点等全方位数据。
+- **多模型驱动**：
+    - **国内主流大模型**: DeepSeek, Kimi (Moonshot), 智谱 (GLM-4), 阿里 (Qwen), 零一万物 (Yi), 硅基流动 (SiliconFlow)。
+    - **本地模型**: 支持 Ollama, LM Studio 等本地部署的 OpenAI 兼容模型。
+- **智能选股器**：通过自然语言描述选股条件（基本面、技术面、行业等），Agent 自动转换为筛选参数并返回结果。
+- **策略回测引擎**：基于 Tushare 日线、可插拔策略注册；支持均线、MACD、RSI、KDJ、布林、动量及唐奇安/海龟、ADX 过滤、量价等 **20+** 种内置策略（详见下文「策略回测」），输出收益、回撤与权益曲线。
+- **模拟投资组合**：支持模拟持仓管理，记录买入/卖出操作，实时查看组合市值、盈亏情况。
+- **股价预警监控**：支持设置股价涨跌幅或目标价监控，触发条件后自动发送邮件提醒。
+- **深度技术分析**：内置 MACD、RSI、KDJ、BOLL 等常见指标计算，并支持金叉/死叉、超买/超卖等形态的自动识别。
+- **宏观数据查询**：支持 GDP、CPI、M2 货币供应量、利率（如 SHIBOR）等宏观经济指标查询，为自上而下投资分析提供数据支撑。
+- **用户画像与偏好记忆**：自动记忆用户的投资风格（如保守/激进）、偏好板块等，提供个性化建议。
+
+## 📦 安装
+
+```bash
+pip install fin-agent
+```
+
+## 🚀 快速开始
+
+安装完成后，直接在终端运行以下命令启动：
+
+```bash
+fin-agent
+```
+
+首次运行会自动引导您配置 API Key。
+
+## ⚙️ 配置说明
+
+Fin-Agent 需要以下配置才能完整工作：
+
+1.  **Tushare Token**: 用于获取金融数据 ([注册 Tushare](https://tushare.pro/))
+2.  **LLM 设置**: 
+    - 支持直接配置 API Key 使用在线商业模型。
+    - 也支持配置 Base URL 使用本地模型（如 Ollama）。
+    - 启动时会有向导指引您选择模型供应商。
+
+## 💻 命令行参数
+
+Fin-Agent 提供了一些实用的命令行参数来管理配置和版本：
+
+| 命令 | 说明 |
+| :--- | :--- |
+| `fin-agent` | 启动交互式对话模式（默认） |
+| `fin-agent --clear-token` | 清除现有的 API Key 配置。当需要更换 Token 或切换 LLM 提供商时使用。 |
+| `fin-agent --upgrade` | 自动检查 PyPI 并升级到 Fin-Agent 的最新版本。如果遇到重大版本更新，会自动清除旧配置。 |
+| `fin-agent --worker` | 启动 Worker 模式（仅运行后台调度任务，无聊天界面），用于持续监控预警任务。 |
+| `fin-agent -v`, `--version` | 显示当前版本号。 |
+| `fin-agent -h`, `--help` | 显示帮助信息和参数说明。 |
+
+## ⏰ 如何启动股价监控
+
+Fin-Agent 的股价预警监控功能需要程序保持运行才能持续生效。
+
+**推荐方式（后台运行）：**
+
+使用 `--worker` 模式启动一个专用的监控进程：
+
+```bash
+fin-agent --worker
+```
+
+此模式下没有聊天界面，程序会持续运行并在后台每分钟检查一次所有设置的预警条件。一旦触发，会通过配置的邮件发送提醒。
+
+**交互模式：**
+
+如果您正在使用默认的交互模式 (`fin-agent`)，监控功能也会在您与 Agent 对话的间隙自动运行。但如果您退出了交互模式，监控也会停止。
+
+## 💬 场景示例
+
+Fin-Agent 支持丰富的金融分析场景，您可以参考以下对话来探索它的能力：
+
+### 1. 基础信息查询
+> **用户**："平安银行属于什么行业？什么时候上市的？"
+> **Agent**："平安银行（000001.SZ）属于银行行业，上市日期为 19910403。它是深圳本地的股份制商业银行..."
+
+### 2. 实时行情与走势
+> **用户**："现在的贵州茅台股价是多少？最近一周走势如何？"
+> **Agent**："贵州茅台当前价格为 1750.00 元，今日下跌 0.5%。回顾过去一周（20240101-20240107），股价整体呈现震荡上行趋势，最高触及 1780 元..."
+
+### 3. 大盘指数分析
+> **用户**："今天大盘（上证指数）表现怎么样？"
+> **Agent**："今日上证指数收于 3050 点，上涨 0.8%，成交量较昨日有所放大，市场情绪回暖..."
+
+### 4. 估值与基本面
+> **用户**："帮我看看万科A现在的估值高吗？"
+> **Agent**："万科A当前的市盈率（PE）为 6.5 倍，市净率（PB）为 0.6 倍。与历史水平及同行业相比，当前估值处于较低位置..."
+
+### 5. 财务业绩分析
+> **用户**："宁德时代去年的营收和净利润是多少？"
+> **Agent**："根据 2023 年年报，宁德时代实现营业收入 4009 亿元，同比增长 22%；净利润 441 亿元，同比增长 43%..."
+
+### 6. 业绩预告筛选
+> **用户**："最近有哪些公司发布了业绩预增公告？"
+> **Agent**："为您查询到近期发布业绩预告的公司中，有以下几家业绩大幅预增：比亚迪（预计增长 60%）、立讯精密..."
+
+### 7. 资金流向监测
+> **用户**："今天中信证券的主力资金是流入还是流出？"
+> **Agent**："今日中信证券主力资金（大单+特大单）净流出 2.5 亿元，其中特大单流出 1.8 亿元，显示机构资金有撤退迹象..."
+
+### 8. 北向资金动向
+> **用户**："今天外资（北向资金）都在买什么？"
+> **Agent**："今日沪深港通十大成交活跃股中，外资净买入前三名分别为：贵州茅台（+5亿）、美的集团（+3亿）、招商银行（+2亿）..."
+
+### 9. 涨跌停分析
+> **用户**："今天有哪些股票涨停了？是什么原因？"
+> **Agent**："今日共有 45 只股票涨停。其中华为概念股表现强势，赛力斯、欧菲光等多只个股涨停..."
+
+### 10. 龙虎榜追踪
+> **用户**："查一下今天龙虎榜的情况，有没有机构大举买入的票？"
+> **Agent**："今日龙虎榜数据显示，机构席位净买入最多的个股是中科曙光，净买入金额达 3 亿元..."
+
+### 11. 概念板块挖掘
+> **用户**："列出几只Sora概念股。"
+> **Agent**："Sora（文生视频）概念股主要包括：因赛集团、万兴科技、中广天择等。其中因赛集团近期关注度较高..."
+
+### 12. 技术指标分析
+> **用户**："帮我看看平安银行现在的 MACD 和 RSI 指标怎么样？"
+> **Agent**："平安银行目前的 MACD 显示 DIF 为 0.15，DEA 为 0.12，MACD 柱状图为正，处于多头趋势。RSI(14) 为 65，显示买盘较强但未进入超买区..."
+
+### 13. 技术形态自动识别
+> **用户**："茅台现在出现了什么技术形态？"
+> **Agent**："经过分析，贵州茅台（600519.SH）今日出现了 KDJ 金叉信号（K值上穿D值），且收盘价突破了布林带中轨，建议关注..."
+
+### 14. 智能选股 (NEW!)
+> **用户**："帮我选出市盈率小于 15，且总市值大于 500 亿的银行股。"
+> **Agent**："为您筛选出符合条件的银行股，按市值排序前 5 名如下：工商银行 (PE 5.2, 市值 1.8万亿)、建设银行... 建议关注其中低估值且分红稳定的标的。"
+
+### 15. 策略回测 (NEW!)
+> **用户**："回测一下中信证券过去一年用 MACD 策略的表现。"
+> **Agent**："回测完成。策略：MACD (金叉买入/死叉卖出)；标的：中信证券 (600030.SH)；时间范围：近一年。
+> 结果：总收益率 **+12.5%**，最大回撤 **-8.3%**，共交易 6 次。表现优于同期大盘 (-5.0%)。"
+
+（可用的 `strategy` 名称与参数说明见下文 **「📈 策略回测」** 专节。）
+
+### 16. 投资组合管理 (NEW!)
+> **用户**："我以 10.5 元的价格买入了 1000 股平安银行，帮我记一下。"
+> **Agent**："已为您添加持仓记录：平安银行 (000001.SZ)，数量 1000 股，成本 10.5 元。"
+>
+> **用户**："现在的持仓盈亏怎么样？"
+> **Agent**："当前持仓总市值 11,200 元，总浮盈 +700 元 (+6.6%)。其中平安银行现价 11.2 元，单笔盈利 700 元。"
+
+### 17. 股价预警监控 (NEW!)
+> **用户**："如果平安银行涨到 12 元提醒我。"
+> **Agent**："已添加预警任务：当 平安银行 (000001.SZ) 价格 > 12.0 时发送提醒。"
+>
+> **用户**："给当前持仓添加一个上涨 5% 的价格提醒。"
+> **Agent**："好的，正在计算目标价格...
+> 平安银行当前价格为 11.2 元，上涨 5% 的目标价为 11.76 元。
+> 已添加预警：当 平安银行 价格 > 11.76 元时提醒您。"
+
+### 18. 用户偏好记忆 (NEW!)
+> **用户**："我是保守型投资者，只喜欢分红稳定的股票。"
+> **Agent**："已记录您的偏好。根据您的保守风格，为您推荐几只高股息率的银行和公用事业股..."
+>
+> **(几天后)**
+> **用户**："推荐一只股票。"
+> **Agent**："基于您偏好的**保守风格**和**高分红**特点，建议关注长江电力..."
+
+### 19. 宏观经济数据查询 (NEW!)
+> **用户**："最近一年的 CPI 和 M2 数据怎么样？通货膨胀压力大吗？"
+> **Agent**："根据最新数据，近 12 个月 CPI 同比涨幅在 0.5%~2.5% 区间震荡，整体通胀压力可控。M2 同比增速维持在 8% 左右，货币政策保持稳健..."
+>
+> **用户**："中国去年的 GDP 增长率是多少？"
+> **Agent**："2024 年中国 GDP 同比增长 5.2%，经济持续恢复向好。分季度看，各季度增速较为平稳..."
+
+## 📈 策略回测
+
+Agent 通过工具 **`run_backtest`** 调用内置回测引擎：传入 **Tushare 股票代码**（如 `000001.SZ`）、**策略名称** `strategy`、可选 **起止日期** 与 **`params` 参数字典**，返回 JSON（含总收益率、最大回撤、交易次数、最近成交及 **equity_curve** 权益序列等）。
+
+### 回测假设与局限
+
+- **频率**：日线；会向前多取一段历史用于指标预热。
+- **标的**：单只股票；按 A 股习惯 **100 股一手** 整数倍成交；默认含简单 **佣金** 假设。
+- **仓位**：默认信号满仓进出；部分策略支持 **ATR 硬止损**（`risk_exit`）或 **按波动/固定比例缩仓**（`position_fraction`）。
+- **扩展**：可在代码中继承 `BacktestStrategy` 并使用 `register_strategy` 注册自定义策略（见包内 `fin_agent.backtest`）。
+
+### 支持的交易策略一览（`run_backtest` 的 `strategy` 参数）
+
+下表列举当前内置的全部策略取值；调用时传入与首列完全一致的字符串。可选参数通过 `params` 对象传入，未列出的键使用代码内默认值。
+
+| 序号 | `strategy` | 分类 | 说明 |
+| ---: | :--- | :--- | :--- |
+| 1 | `ma_cross` | 均线 | 双均线金叉买、死叉卖。常用：`short_window`, `long_window`。 |
+| 2 | `macd` | 指标 | DIF/DEA 金叉死叉。常用：`fast_period`, `slow_period`, `signal_period`。 |
+| 3 | `rsi` | 指标 | RSI 穿越超卖/超买阈值。常用：`window`, `lower`, `upper`。 |
+| 4 | `kdj` | 指标 | K 与 D 金叉死叉。常用：`k_period`, `d_period`, `j_period`。 |
+| 5 | `boll_reversion` | 布林 | 下轨外收回买、上穿中轨卖。常用：`period`, `std_dev`。 |
+| 6 | `boll_breakout` | 布林 | 突破上轨买、跌回中轨下卖。常用：`period`, `std_dev`。 |
+| 7 | `momentum_roc` | 动量 | N 日 ROC 过零。常用：`roc_window`。 |
+| 8 | `donchian_breakout` | 通道 | 唐奇安：破 N 日高买、破 N 日低卖。常用：`channel_period`。 |
+| 9 | `turtle` | 通道 | 入场周期新高进、出场周期新低出；可选 ATR 止损。常用：`entry_period`, `exit_period`, `atr_stop_mult`, `atr_period`。 |
+| 10 | `adx_macd` | 复合 | ADX 与 DI 过滤趋势后再用 MACD。常用：`adx_period`, `min_adx` 及 MACD 周期参数。 |
+| 11 | `triple_ma` | 均线 | 三均线排列与短穿中。常用：`short_window`, `mid_window`, `long_window`。 |
+| 12 | `ema_sma_bias` | 均线 | 价穿 EMA 且 EMA>SMA 与乖离。常用：`ema_span`, `sma_window`, `bias_threshold`。 |
+| 13 | `cci` | 震荡 | CCI 穿越超卖/超买线。常用：`period`, `oversold`, `overbought`。 |
+| 14 | `williams_r` | 震荡 | Williams %R 区段穿越。常用：`period`, `oversold`, `overbought`。 |
+| 15 | `stochastic` | 震荡 | 随机指标 %K/%D 与区段。常用：`k_period`, `d_period`, `oversold_level`, `overbought_level`。 |
+| 16 | `rsi_ma200` | 复合 | RSI + 长期均线过滤。常用：`ma_window`, `window`, `lower`, `upper`。 |
+| 17 | `volume_breakout` | 量价 | 放量突破 N 日高。常用：`breakout_period`, `vol_ma_period`, `volume_mult`, `exit_period`。 |
+| 18 | `obv_cross` | 量价 | OBV 与其均线交叉。常用：`obv_ma_period`。 |
+| 19 | `vwap_deviation` | 量价 | 相对日频 VWAP 近似线偏离。常用：`period`, `deviation`。 |
+| 20 | `ma_cross_atr_stop` | 风险 | 双均线 + ATR 倍数硬止损。常用：`atr_stop_mult`, `atr_period`, `short_window`, `long_window`。 |
+| 21 | `vol_target_ma_cross` | 风险 | 双均线 + 按 ATR 缩仓。常用：`risk_budget_pct`, `max_fraction`, `atr_period`。 |
+| 22 | `kelly_ma_cross` | 风险 | 双均线 + 固定仓位比例。常用：`equity_fraction`, `short_window`, `long_window`。 |
+| 23 | `cross_section_momentum` | 占位 | 截面动量/多标的；**当前单标的引擎会返回 error**，仅预留扩展。 |
+
+## 📊 数据来源
+
+*   **金融数据**: [Tushare Pro](https://tushare.pro/) - 专业免费的财经数据接口包。
+*   **大模型**: 支持 [DeepSeek](https://www.deepseek.com/), Moonshot, ZhipuAI, Qwen 等多种模型。
+
+## 📝 许可证
+
+本项目采用 [MIT License](LICENSE) 开源许可证。
+
+## 👥 开源贡献
+
+![Alt](https://repobeats.axiom.co/api/embed/788a8349b9decac56318a205859ba6d52b2edddd.svg "Repobeats analytics image")
+
+## ⭐ Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=YUHAI0/fin-agent&type=date&legend=top-left)](https://www.star-history.com/#YUHAI0/fin-agent&type=date&legend=top-left)
