@@ -1,8 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, ExternalLink, Loader2, Search, X } from 'lucide-react'
+import { AlertTriangle, ExternalLink, FileText, Loader2, Search, X } from 'lucide-react'
 import FaSelect from '../FaSelect'
 import { useAppDialog } from '../../contexts/AppDialogContext'
-import { NEWS_SOURCE_LABELS, NEWS_SENTIMENT_LABELS, NEWS_TYPE_LABELS, formatNewsTime, sentimentBadgeClass } from '../../utils/news'
+import {
+  NEWS_SOURCE_LABELS,
+  NEWS_SENTIMENT_LABELS,
+  NEWS_TYPE_LABELS,
+  formatNewsTime,
+  hasNewsUrl,
+  normalizeNewsUrl,
+  sentimentBadgeClass
+} from '../../utils/news'
 
 const PAGE_SIZE = 20
 
@@ -256,9 +264,8 @@ const NewsFeedTab: React.FC<NewsFeedTabProps> = ({
         onUnreadChanged()
       }
     }
-    const rawUrl = (item.url || '').trim()
-    if (rawUrl) {
-      const url = /^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`
+    const url = normalizeNewsUrl(item.url)
+    if (url) {
       try {
         const res = await window.api.openExternal(url)
         if (!res?.success) {
@@ -273,6 +280,7 @@ const NewsFeedTab: React.FC<NewsFeedTabProps> = ({
           message: e instanceof Error ? e.message : '无法打开外部链接'
         })
       }
+      return
     }
   }
 
@@ -444,6 +452,7 @@ const NewsFeedTab: React.FC<NewsFeedTabProps> = ({
                 .map((id) => subscriptionNameMap.get(id))
                 .filter((s): s is NewsSubscription => Boolean(s))
               const isHighlighted = highlightId === item.id
+              const linkable = hasNewsUrl(item)
               return (
                 <li key={item.id}>
                   <div
@@ -460,9 +469,15 @@ const NewsFeedTab: React.FC<NewsFeedTabProps> = ({
                         void handleOpenItem(item)
                       }
                     }}
-                    className={`fa-news-item focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--fa-accent)] ${
-                      !item.read ? 'fa-news-item-unread' : ''
-                    } ${isHighlighted ? 'ring-2 ring-[var(--fa-accent)]' : ''}`}
+                    className={[
+                      'fa-news-item focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--fa-accent)]',
+                      linkable ? 'fa-news-item--link' : 'fa-news-item--summary',
+                      !item.read ? 'fa-news-item-unread' : '',
+                      isHighlighted ? 'ring-2 ring-[var(--fa-accent)]' : ''
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
+                    title={linkable ? '点击在浏览器中打开原文' : '该条暂无原文链接，点击标记已读'}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex min-w-0 flex-1 items-center gap-1.5">
@@ -472,11 +487,28 @@ const NewsFeedTab: React.FC<NewsFeedTabProps> = ({
                             {NEWS_SENTIMENT_LABELS[item.sentiment]}
                           </span>
                         )}
-                        <h3 className="min-w-0 truncate text-sm font-medium text-[var(--fa-text)]">
+                        <span
+                          className={`fa-news-item-kind ${linkable ? 'fa-news-item-kind--link' : 'fa-news-item-kind--summary'}`}
+                        >
+                          {linkable ? '原文' : '仅摘要'}
+                        </span>
+                        <h3
+                          className={`fa-news-item-title min-w-0 truncate text-sm font-medium ${
+                            linkable ? 'fa-news-item-title--link' : ''
+                          }`}
+                        >
                           {item.title}
                         </h3>
                       </div>
-                      <ExternalLink size={13} className="mt-0.5 shrink-0 text-[var(--fa-faint)]" aria-hidden />
+                      {linkable ? (
+                        <ExternalLink
+                          size={13}
+                          className="fa-news-item-action-icon mt-0.5 shrink-0"
+                          aria-hidden
+                        />
+                      ) : (
+                        <FileText size={13} className="fa-news-item-action-icon mt-0.5 shrink-0" aria-hidden />
+                      )}
                     </div>
                     {item.summary && (
                       <p className="line-clamp-2 text-xs leading-relaxed text-[var(--fa-muted)]">{item.summary}</p>

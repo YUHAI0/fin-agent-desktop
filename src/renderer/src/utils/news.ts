@@ -103,3 +103,15 @@ export function formatNewsTime(value: string): string {
   if (Number.isNaN(date.getTime())) return value
   return date.toLocaleString('zh-CN', { hour12: false })
 }
+
+/** 新闻是否带有可打开的外部原文链接 */
+export function hasNewsUrl(item: Pick<NotifiedNewsItem, 'url'>): boolean {
+  return Boolean((item.url || '').trim())
+}
+
+/** 规范化外部链接；无效时返回 null */
+export function normalizeNewsUrl(raw: string | undefined | null): string | null {
+  const text = (raw || '').trim()
+  if (!text) return null
+  return /^https?:\/\//i.test(text) ? text : `https://${text}`
+}
