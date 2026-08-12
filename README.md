@@ -71,11 +71,7 @@ Fin-Agent Desktop 是一款基于 Electron + Python 的智能金融助手桌面�
 前往 [Release](https://github.com/YUHAI0/fin-agent-desktop/releases) 页面下载最新版本的安装包。
 
 
-
 ## 📄 许可证
 
 本项目采用 MIT 许可证。详见 [LICENSE](LICENSE) 文件。
 
-## ⭐ Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=YUHAI0/fin-agent-desktop&type=date&legend=top-left)](https://www.star-history.com/#YUHAI0/fin-agent-desktop&type=date&legend=top-left)
