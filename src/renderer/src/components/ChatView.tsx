@@ -202,8 +202,14 @@ function readSidebarPrefs(): { width: number; collapsed: boolean } {
 const ChatView: React.FC = () => {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const { messages, setMessages, updateSessionMessages, activeSessionId, ensureActiveSession } =
-    useChat() // 使用 Context 中的消息历史
+  const {
+    messages,
+    setMessages,
+    updateSessionMessages,
+    activeSessionId,
+    ensureActiveSession,
+    setSessionStreaming
+  } = useChat() // 使用 Context 中的消息历史
   const { theme, setTheme } = useTheme()
   const [input, setInput] = useState('')
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -223,6 +229,10 @@ const ChatView: React.FC = () => {
   activeSessionIdRef.current = activeSessionId
   const ensureActiveSessionRef = useRef(ensureActiveSession)
   ensureActiveSessionRef.current = ensureActiveSession
+  const setSessionStreamingRef = useRef(setSessionStreaming)
+  setSessionStreamingRef.current = setSessionStreaming
+  const sendUserTextRef = useRef<(text: string) => Promise<void>>(async () => {})
+  const lastPrefillConsumedRef = useRef<{ text: string; at: number } | null>(null)
 
   useEffect(() => {
     localStorage.setItem(
@@ -262,6 +272,8 @@ const ChatView: React.FC = () => {
       else next.delete(key)
       return next
     })
+    const sid = sessionId || activeSessionIdRef.current
+    if (sid) setSessionStreamingRef.current(sid, responding)
   }
 
   const scrollToBottom = () => {
@@ -782,6 +794,64 @@ const ChatView: React.FC = () => {
       scrollToBottom()
     }, 0)
   }
+  sendUserTextRef.current = sendUserText
+
+  const consumePrefill = (raw: string) => {
+    const text = raw.trim()
+    if (!text) return
+    const now = Date.now()
+    const last = lastPrefillConsumedRef.current
+    if (last && last.text === text && now - last.at < 800) {
+      try {
+        sessionStorage.removeItem('fa-prefill')
+      } catch {
+        // ignore
+      }
+      return
+    }
+    lastPrefillConsumedRef.current = { text, at: now }
+    try {
+      sessionStorage.removeItem('fa-prefill')
+    } catch {
+      // ignore
+    }
+    setInput(text)
+    void sendUserTextRef.current(text)
+  }
+
+  // 预填：自定义事件 + ?prefill= query + sessionStorage 交接
+  useEffect(() => {
+    const onPrefillSend = (event: Event) => {
+      const detail = (event as CustomEvent<{ text?: string }>).detail
+      if (typeof detail?.text === 'string') consumePrefill(detail.text)
+    }
+    window.addEventListener('fa-prefill-send', onPrefillSend)
+    return () => window.removeEventListener('fa-prefill-send', onPrefillSend)
+  }, [])
+
+  useEffect(() => {
+    try {
+      const stored = sessionStorage.getItem('fa-prefill')
+      if (stored) consumePrefill(stored)
+    } catch {
+      // ignore
+    }
+    // 仅挂载时读取 requestPrefill 的 sessionStorage 交接
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    const fromQuery = searchParams.get('prefill')
+    if (fromQuery == null || fromQuery === '') return
+    let text = fromQuery
+    try {
+      text = decodeURIComponent(fromQuery)
+    } catch {
+      text = fromQuery
+    }
+    consumePrefill(text)
+    navigate('/chat', { replace: true })
+  }, [searchParams, navigate])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

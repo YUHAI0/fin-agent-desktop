@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { normalizeSessionMessages } from '../utils/welcomeAgentMessage'
 
 export type ChatBlock =
@@ -43,6 +44,10 @@ interface ChatContextType {
   /** 发送前确保已有真实会话；草稿态会创建并打开标签后返回 id */
   ensureActiveSession: (seedTitle?: string) => Promise<string>
   refreshTabs: () => Promise<void>
+  /** 跳转聊天并预填；若当前会话正在流式则先新开会话 */
+  requestPrefill: (text: string) => Promise<void>
+  setSessionStreaming: (sessionId: string, streaming: boolean) => void
+  isActiveSessionStreaming: () => boolean
 }
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined)
@@ -87,7 +92,10 @@ function resolveMessages(action: MessagesUpdater, current: Message[]): Message[]
   return typeof action === 'function' ? action(current) : action
 }
 
+const PREFILL_STORAGE_KEY = 'fa-prefill'
+
 export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  const navigate = useNavigate()
   const [messagesBySession, setMessagesBySession] = useState<Record<string, Message[]>>({})
   const [openTabs, setOpenTabs] = useState<SessionMeta[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
@@ -97,6 +105,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const activeSessionIdRef = useRef(activeSessionId)
   activeSessionIdRef.current = activeSessionId
   const ensureSessionPromiseRef = useRef<Promise<string> | null>(null)
+  const streamingBySessionRef = useRef<Record<string, boolean>>({})
 
   const isDraftSession = ready && !activeSessionId
 
@@ -168,8 +177,39 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       delete next[DRAFT_SESSION_KEY]
       return next
     })
+    // 立即同步 ref，避免 await newSession() 后 requestPrefill 仍打到旧会话
+    activeSessionIdRef.current = null
     setActiveSessionId(null)
   }, [])
+
+  const setSessionStreaming = useCallback((sessionId: string, streaming: boolean) => {
+    if (!sessionId) return
+    streamingBySessionRef.current[sessionId] = streaming
+  }, [])
+
+  const isActiveSessionStreaming = useCallback(() => {
+    const id = activeSessionIdRef.current
+    if (!id) return false
+    return Boolean(streamingBySessionRef.current[id])
+  }, [])
+
+  const requestPrefill = useCallback(
+    async (text: string) => {
+      const value = text.trim()
+      if (!value) return
+      if (isActiveSessionStreaming()) {
+        await newSession()
+      }
+      try {
+        sessionStorage.setItem(PREFILL_STORAGE_KEY, value)
+      } catch {
+        // ignore quota / private mode
+      }
+      window.dispatchEvent(new CustomEvent('fa-prefill-send', { detail: { text: value } }))
+      navigate('/chat')
+    },
+    [isActiveSessionStreaming, navigate, newSession]
+  )
 
   const ensureActiveSession = useCallback(
     async (seedTitle?: string) => {
@@ -304,7 +344,10 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         archiveTab,
         newSession,
         ensureActiveSession,
-        refreshTabs
+        refreshTabs,
+        requestPrefill,
+        setSessionStreaming,
+        isActiveSessionStreaming
       }}
     >
       {children}
