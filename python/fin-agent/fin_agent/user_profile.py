@@ -63,6 +63,11 @@ class UserProfileManager:
         用 is not None 判断，以便显式写入 Unknown / 空列表。
         空字符串不写入；experience_level 仅接受 beginner/experienced/Unknown。
         """
+        if experience_level is not None:
+            allowed = {"beginner", "experienced", "Unknown"}
+            if experience_level not in allowed:
+                raise ValueError("experience_level 无效")
+
         if risk_tolerance is not None and risk_tolerance != "":
             self.profile["risk_tolerance"] = risk_tolerance
         if investment_horizon is not None and investment_horizon != "":
@@ -74,9 +79,6 @@ class UserProfileManager:
         if investment_style is not None and investment_style != "":
             self.profile["investment_style"] = investment_style
         if experience_level is not None:
-            allowed = {"beginner", "experienced", "Unknown"}
-            if experience_level not in allowed:
-                raise ValueError("experience_level 无效")
             self.profile["experience_level"] = experience_level
 
         # Update custom preferences
