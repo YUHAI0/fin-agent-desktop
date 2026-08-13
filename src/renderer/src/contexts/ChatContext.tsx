@@ -193,6 +193,17 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return Boolean(streamingBySessionRef.current[id])
   }, [])
 
+  // ChatView 卸载后仍需清流式标记，否则离开 /chat 会卡住 requestPrefill 的 newSession 判断
+  useEffect(() => {
+    const remove = window.api.onBotStream((data: any) => {
+      if (!data) return
+      if (data.type !== 'error' && data.type !== 'finish' && data.type !== 'done') return
+      const sid = data.sessionId || activeSessionIdRef.current
+      if (sid) setSessionStreaming(sid, false)
+    })
+    return () => remove()
+  }, [setSessionStreaming])
+
   const requestPrefill = useCallback(
     async (text: string) => {
       const value = text.trim()

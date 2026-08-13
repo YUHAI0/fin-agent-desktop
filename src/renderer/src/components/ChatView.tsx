@@ -786,6 +786,11 @@ const ChatView: React.FC = () => {
     }
 
     window.api.submitInput(trimmed, sessionId)
+    try {
+      sessionStorage.removeItem('fa-prefill')
+    } catch {
+      // ignore
+    }
     setInput('')
     markResponding(sessionId, true)
     setTimeout(() => {
@@ -801,20 +806,8 @@ const ChatView: React.FC = () => {
     if (!text) return
     const now = Date.now()
     const last = lastPrefillConsumedRef.current
-    if (last && last.text === text && now - last.at < 800) {
-      try {
-        sessionStorage.removeItem('fa-prefill')
-      } catch {
-        // ignore
-      }
-      return
-    }
+    if (last && last.text === text && now - last.at < 800) return
     lastPrefillConsumedRef.current = { text, at: now }
-    try {
-      sessionStorage.removeItem('fa-prefill')
-    } catch {
-      // ignore
-    }
     setInput(text)
     void sendUserTextRef.current(text)
   }
@@ -843,13 +836,7 @@ const ChatView: React.FC = () => {
   useEffect(() => {
     const fromQuery = searchParams.get('prefill')
     if (fromQuery == null || fromQuery === '') return
-    let text = fromQuery
-    try {
-      text = decodeURIComponent(fromQuery)
-    } catch {
-      text = fromQuery
-    }
-    consumePrefill(text)
+    consumePrefill(fromQuery)
     navigate('/chat', { replace: true })
   }, [searchParams, navigate])
 
