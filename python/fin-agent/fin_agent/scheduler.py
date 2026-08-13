@@ -8,6 +8,7 @@ import uuid
 from pathlib import Path
 from fin_agent.config import Config
 from fin_agent.notification import NotificationManager
+from fin_agent.alert_history import AlertHistoryStore
 
 
 import errno
@@ -358,6 +359,20 @@ class TaskScheduler:
                 """
                 
                 print(f"\n[Scheduler] Triggering task {task['id']}: {subject}")
+
+                try:
+                    AlertHistoryStore().append({
+                        "task_id": task["id"],
+                        "ts_code": ts_code,
+                        "stock_name": stock_name,
+                        "operator": operator,
+                        "threshold": threshold,
+                        "price": current_price,
+                    })
+                except Exception as hist_err:
+                    logger.error(
+                        f"Failed to append alert history for {task['id']}: {hist_err}"
+                    )
 
                 desktop_body = (
                     f"{ts_code} 现价 {current_price:.2f}，"

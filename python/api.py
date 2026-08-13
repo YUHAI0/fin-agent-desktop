@@ -64,6 +64,7 @@ try:
     from fin_agent.agent.core import FinAgent
     from fin_agent.config import Config
     from fin_agent.scheduler import TaskScheduler
+    from fin_agent.alert_history import AlertHistoryStore
     from fin_agent import session_store
     from fin_agent.portfolio import PortfolioManager
     from fin_agent.news import SUPPORTED_NEWS_SOURCES
@@ -602,6 +603,65 @@ def handle_config_check(req):
 def handle_scheduler_tasks(req):
     scheduler = TaskScheduler()
     return {"tasks": scheduler.list_tasks_enriched()}
+
+
+@route("POST", "/scheduler/tasks/price-alert-pct")
+def handle_price_alert_pct(req):
+    body = req.body or {}
+    ts_code = (body.get("ts_code") or "").strip()
+    direction = (body.get("direction") or "").strip().lower()
+    email = body.get("email")
+    if not ts_code:
+        return {"success": False, "error": "请填写股票代码"}
+    if direction not in ("up", "down"):
+        return {"success": False, "error": "方向必须为上涨超过或下跌超过"}
+    try:
+        pct = float(body.get("pct"))
+    except (TypeError, ValueError):
+        return {"success": False, "error": "百分比必须为数字"}
+    if pct <= 0:
+        return {"success": False, "error": "百分比必须大于 0"}
+
+    try:
+        from fin_agent.datasources.normalize import to_ts_code
+        ts_code = to_ts_code(ts_code)
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+
+    try:
+        from fin_agent.datasources import get_provider
+        df = get_provider().get_realtime_price(ts_code)
+        if df is None or df.empty:
+            return {"success": False, "error": "无法获取现价，未创建提醒"}
+        record = df.iloc[0].to_dict()
+        price = float(record.get("price") or 0)
+        if price <= 0:
+            return {"success": False, "error": "无法获取现价，未创建提醒"}
+    except Exception:
+        return {"success": False, "error": "无法获取现价，未创建提醒"}
+
+    operator = ">=" if direction == "up" else "<="
+    threshold = round(
+        price * (1 + pct / 100) if direction == "up" else price * (1 - pct / 100),
+        4,
+    )
+    scheduler = TaskScheduler()
+    task_id = scheduler.add_price_alert(ts_code, operator, threshold, email)
+    return {
+        "success": True,
+        "task_id": task_id,
+        "threshold": threshold,
+        "ref_price": price,
+    }
+
+
+@route("GET", "/scheduler/alert-history")
+def handle_alert_history(req):
+    try:
+        limit = int(req.query.get("limit", 100))
+    except (TypeError, ValueError):
+        limit = 100
+    return {"items": AlertHistoryStore().list_items(limit=limit)}
 
 
 @route("POST", "/notification")

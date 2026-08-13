@@ -2298,6 +2298,27 @@ app.whenReady().then(() => {
     }
   })
 
+  ipcMain.handle('create-price-alert-pct', async (
+    _,
+    payload: { ts_code: string; direction: 'up' | 'down'; pct: number; email?: string }
+  ) => {
+    try {
+      return await makeApiRequest('/scheduler/tasks/price-alert-pct', 'POST', payload)
+    } catch (e) {
+      console.error('[Main] create-price-alert-pct failed:', e)
+      return { success: false, error: String(e) }
+    }
+  })
+
+  ipcMain.handle('list-alert-history', async () => {
+    try {
+      return await makeApiRequest('/scheduler/alert-history')
+    } catch (e) {
+      console.error('[Main] list-alert-history failed:', e)
+      return { error: String(e) }
+    }
+  })
+
   ipcMain.handle('list-news-subscriptions', async (
     _e,
     filters?: { enabled?: boolean; type?: string }

@@ -141,6 +141,13 @@ const api = {
   setAutoLaunch: (enabled: boolean) => ipcRenderer.invoke('set-auto-launch', enabled),
   listSchedulerTasks: () => ipcRenderer.invoke('list-scheduler-tasks'),
   removeSchedulerTask: (taskId: string) => ipcRenderer.invoke('remove-scheduler-task', taskId),
+  createPriceAlertPct: (payload: {
+    ts_code: string
+    direction: 'up' | 'down'
+    pct: number
+    email?: string
+  }) => ipcRenderer.invoke('create-price-alert-pct', payload),
+  listAlertHistory: () => ipcRenderer.invoke('list-alert-history'),
   listNewsSubscriptions: (filters?: { enabled?: boolean; type?: string }) =>
     ipcRenderer.invoke('list-news-subscriptions', filters),
   createNewsSubscription: (payload: unknown) =>

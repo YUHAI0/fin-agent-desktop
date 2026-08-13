@@ -88,6 +88,17 @@ interface PortfolioDetail {
   total_pnl_pct: number
 }
 
+interface AlertHistoryItem {
+  id: string
+  task_id?: string
+  ts_code?: string
+  stock_name?: string
+  operator?: string
+  threshold?: number
+  price?: number
+  triggered_at?: number
+}
+
 interface PositionPayload {
   id?: string
   ts_code: string
@@ -340,6 +351,22 @@ declare interface Window {
     removeSchedulerTask: (
       taskId: string
     ) => Promise<{ success?: boolean; removed?: boolean; error?: string }>
+    createPriceAlertPct: (payload: {
+      ts_code: string
+      direction: 'up' | 'down'
+      pct: number
+      email?: string
+    }) => Promise<{
+      success: boolean
+      task_id?: string
+      threshold?: number
+      ref_price?: number
+      error?: string
+    }>
+    listAlertHistory: () => Promise<{
+      items?: AlertHistoryItem[]
+      error?: string
+    }>
     listNewsSubscriptions: (
       filters?: { enabled?: boolean; type?: NewsSubscriptionType }
     ) => Promise<{ subscriptions: NewsSubscription[]; error?: string }>
