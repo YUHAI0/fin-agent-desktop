@@ -78,6 +78,23 @@ interface PortfolioPosition {
   note: string
 }
 
+interface PortfolioIndustryBucket {
+  industry: string
+  market_value: number
+  weight_pct: number
+}
+
+interface PortfolioConcentration {
+  top1_pct: number
+  top3_pct: number
+  hhi: number
+}
+
+interface PortfolioBreakdown {
+  by_industry: PortfolioIndustryBucket[]
+  concentration: PortfolioConcentration
+}
+
 interface PortfolioDetail {
   portfolio_id: string
   portfolio_name: string
@@ -86,6 +103,7 @@ interface PortfolioDetail {
   total_cost_value: number
   total_pnl: number
   total_pnl_pct: number
+  breakdown?: PortfolioBreakdown
 }
 
 interface AlertHistoryItem {

@@ -264,6 +264,7 @@ class PortfolioManager:
                 "total_cost_value": 0.0,
                 "total_pnl": 0.0,
                 "total_pnl_pct": 0.0,
+                "breakdown": self._empty_breakdown(),
             }
 
         price_map = self._batch_prices(list(positions.keys()))
@@ -309,7 +310,80 @@ class PortfolioManager:
             "total_cost_value": round(total_cost_value, 2),
             "total_pnl": round(total_pnl, 2),
             "total_pnl_pct": round(total_pnl / total_cost_value * 100, 2) if total_cost_value else 0.0,
+            "breakdown": self._compute_breakdown(report, total_market_value),
         }
+
+    def _empty_breakdown(self):
+        return {
+            "by_industry": [],
+            "concentration": {"top1_pct": 0.0, "top3_pct": 0.0, "hhi": 0.0},
+        }
+
+    @staticmethod
+    def _industry_label(value):
+        if value is None:
+            return "未知"
+        try:
+            if value != value:
+                return "未知"
+        except Exception:
+            pass
+        text = str(value).strip()
+        if not text or text.lower() in ("nan", "none", "null"):
+            return "未知"
+        return text
+
+    def _industry_map(self, ts_codes, timeout_sec=8.0):
+        """一次拉取股票基础信息，按 ts_code 映射行业；失败则空映射（调用方回落「未知」）。"""
+        from fin_agent.datasources import get_provider
+
+        wanted = {str(code) for code in ts_codes if code}
+
+        def fetch():
+            df = get_provider().get_stock_basic()
+            if df is None or len(df) == 0 or "ts_code" not in df.columns:
+                return {}
+            codes = df["ts_code"].astype(str)
+            if wanted:
+                df = df[codes.isin(wanted)]
+                codes = df["ts_code"].astype(str)
+            industries = df["industry"] if "industry" in df.columns else [None] * len(df)
+            return dict(zip(codes, industries))
+
+        with ThreadPoolExecutor(max_workers=1) as ex:
+            future = ex.submit(fetch)
+            try:
+                return future.result(timeout=timeout_sec)
+            except (FuturesTimeoutError, Exception):
+                return {}
+
+    def _compute_breakdown(self, positions, total_market_value):
+        if not positions or not total_market_value:
+            return self._empty_breakdown()
+
+        weights = [item["market_value"] / total_market_value for item in positions]
+        ranked = sorted(weights, reverse=True)
+        concentration = {
+            "top1_pct": round(ranked[0] * 100, 2),
+            "top3_pct": round(sum(ranked[:3]) * 100, 2),
+            "hhi": round(sum(w * w for w in weights), 4),
+        }
+
+        industry_map = self._industry_map([item["ts_code"] for item in positions])
+        buckets = {}
+        for item in positions:
+            industry = self._industry_label(industry_map.get(item["ts_code"]))
+            buckets[industry] = buckets.get(industry, 0.0) + item["market_value"]
+
+        by_industry = [
+            {
+                "industry": industry,
+                "market_value": round(market_value, 2),
+                "weight_pct": round(market_value / total_market_value * 100, 2),
+            }
+            for industry, market_value in sorted(buckets.items(), key=lambda kv: -kv[1])
+        ]
+        return {"by_industry": by_industry, "concentration": concentration}
 
     def _batch_prices(self, ts_codes, timeout_sec=8.0):
         """批量取实时行情，整体超时后按空结果处理（估值回落到成本价）。"""

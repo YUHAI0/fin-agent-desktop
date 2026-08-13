@@ -1,8 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Pencil, Plus, Trash2 } from 'lucide-react'
+import { ArrowLeft, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react'
 import PositionEditModal from './PositionEditModal'
 import { useAppDialog } from '../contexts/AppDialogContext'
+import { useChat } from '../contexts/ChatContext'
+import { buildPortfolioDiagnosePrefill } from '../utils/chatPrefill'
 import SubPageShell from './SubPageShell'
 
 const money = (n: number) => n.toLocaleString('zh-CN', { maximumFractionDigits: 2 })
@@ -13,6 +15,7 @@ const signed = (n: number) => `${n > 0 ? '+' : ''}${money(n)}`
 const PortfolioView: React.FC = () => {
   const navigate = useNavigate()
   const { confirm, alert, prompt } = useAppDialog()
+  const { requestPrefill } = useChat()
   const [portfolios, setPortfolios] = useState<PortfolioMeta[]>([])
   const [activeId, setActiveId] = useState<string>('')
   const [detail, setDetail] = useState<PortfolioDetail | null>(null)
@@ -100,6 +103,19 @@ const PortfolioView: React.FC = () => {
     refresh()
   }
 
+  const handleDiagnose = async () => {
+    if (!detail?.positions.length) {
+      await alert({ title: '请先添加持仓' })
+      return
+    }
+    await requestPrefill(
+      buildPortfolioDiagnosePrefill(detail.portfolio_id, detail.portfolio_name)
+    )
+  }
+
+  const breakdown = detail?.breakdown
+  const hasHoldings = Boolean(detail?.positions.length)
+
   return (
     <SubPageShell>
       <div className="fa-page-header justify-between">
@@ -116,6 +132,14 @@ const PortfolioView: React.FC = () => {
           <h1 className="text-sm font-semibold">投资组合</h1>
         </div>
         <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => void handleDiagnose()}
+            className="fa-btn-ghost inline-flex items-center gap-1 px-3 py-1.5 text-xs"
+          >
+            <Sparkles size={14} aria-hidden />
+            组合诊断
+          </button>
           <button
             type="button"
             onClick={() => {
@@ -176,6 +200,35 @@ const PortfolioView: React.FC = () => {
             <div className={`text-base tabular-nums ${toneClass(detail.total_pnl)}`}>
               {signed(detail.total_pnl)} · {signed(detail.total_pnl_pct)}%
             </div>
+          </div>
+        </div>
+      )}
+
+      {!loading && hasHoldings && breakdown && (
+        <div className="shrink-0 px-4 pb-3">
+          <div className="fa-card px-3 py-2.5">
+            <div className="mb-2 flex items-baseline justify-between gap-3">
+              <span className="text-[11px] text-[var(--fa-faint)]">行业分布</span>
+              <span className="text-[11px] tabular-nums text-[var(--fa-muted)]">
+                前一 {breakdown.concentration.top1_pct.toFixed(1)}% · 前三 {breakdown.concentration.top3_pct.toFixed(1)}%
+              </span>
+            </div>
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-[var(--fa-faint)]">
+                  <th className="pb-1 text-left font-normal">行业</th>
+                  <th className="pb-1 text-right font-normal">权重%</th>
+                </tr>
+              </thead>
+              <tbody>
+                {breakdown.by_industry.map((row) => (
+                  <tr key={row.industry}>
+                    <td className="py-0.5">{row.industry}</td>
+                    <td className="py-0.5 text-right tabular-nums">{row.weight_pct.toFixed(1)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
