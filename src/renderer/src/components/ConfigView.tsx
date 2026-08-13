@@ -460,6 +460,11 @@ const ConfigView: React.FC = () => {
             <p className="fa-hint">
               akshare 无需注册即可使用，覆盖 A 股基础信息、日线、实时行情、每日指标、利润表与指数行情。
             </p>
+            {!tushareToken.trim() && (
+              <p className="fa-hint">
+                当前未填写 Tushare Token，以下能力不可用：选股筛选、资金流、涨跌停/龙虎榜、业绩预告、概念成分、沪深港通、港美股、ETF、可转债、期货、宏观数据、全球指数对比。填写 Token 后即可解锁。
+              </p>
+            )}
           </div>
           <div className="space-y-2">
             <div className="flex items-center gap-2">

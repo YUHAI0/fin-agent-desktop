@@ -37,9 +37,14 @@ class FinAgent:
             )
         return (
             f"### 数据源 ###\n"
-            f"当前行情数据源：{source}。用户未配置 Tushare Token，以下工具不可用，调用只会返回设置提示，请勿调用；"
-            f"若用户需要相关数据，请引导其在设置页配置 Tushare Token。\n"
-            f"不可用工具：{self.TUSHARE_ONLY_TOOLS}\n\n"
+            f"当前行情数据源：{source}。用户未配置 Tushare Token。\n"
+            f"以下工具仅 Tushare 可用（TUSHARE_ONLY_TOOLS）。无 Token 时调用只会返回设置提示："
+            f"**禁止调用，禁止因失败而重试，禁止换清单内其他工具再试。**\n"
+            f"不可用工具：{self.TUSHARE_ONLY_TOOLS}\n"
+            f"若用户询问选股筛选、资金流、涨跌停/龙虎榜、业绩预告、概念成分、沪深港通、"
+            f"港美股、ETF、可转债、期货、宏观或全球指数对比：只引导一次打开设置页填写 Tushare Token，"
+            f"不要循环调用工具，也不要用其他工具凑数假装已取得这些数据。\n"
+            f"A 股现价、日线、估值、财报、指数仍可用当前数据源。\n\n"
         )
 
     def _get_system_content(self):
@@ -106,7 +111,8 @@ class FinAgent:
             "简单确认（如「好的」）可省略。功能总览请求须全面回答并附 6-8 条示例意图。\n\n"
             "### 工具失败 ###\n"
             "工具调用失败时，须用中文向用户说明原因并给出替代方案，例如：\n"
-            "- 未配置 Tushare Token → 引导打开设置页配置；\n"
+            "- 未配置 Tushare Token → 只引导一次打开设置页填写 Token；"
+            "禁止再次调用 TUSHARE_ONLY_TOOLS 清单中的任何工具；\n"
             "- akshare 或网络失败 → 建议稍后重试或换用其他可用工具；\n"
             "不要只输出英文错误原文或反复重试同一失败工具。\n\n"
             "### 免责声明 ###\n"

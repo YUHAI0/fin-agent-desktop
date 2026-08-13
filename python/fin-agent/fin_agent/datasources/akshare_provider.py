@@ -1,5 +1,6 @@
 """akshare 数据源实现。对外统一为 Tushare 风格的代码与列名。"""
 import re
+import time
 
 import akshare as ak
 import pandas as pd
@@ -19,6 +20,19 @@ _QUOTE_HEADERS = {
 }
 
 _ADJ_MAP = {None: "", "": "", "qfq": "qfq", "hfq": "hfq"}
+
+
+def _with_retry(fn, retries=2, delay=0.4):
+    last = None
+    for i in range(retries + 1):
+        try:
+            return fn()
+        except Exception as e:
+            last = e
+            if i < retries:
+                time.sleep(delay)
+    raise last
+
 
 _DAILY_MAPPING = {
     "日期": "trade_date",
@@ -220,26 +234,26 @@ class AkshareProvider(MarketDataProvider):
         end = normalize_date(end_date) or "20991231"
         adjust = _ADJ_MAP.get(adj, "")
 
-        # 优先腾讯单票日线（本网络更稳）；失败再试东财
+        # 优先腾讯单票日线（本网络更稳）；失败再试东财；各源独立重试
         out = pd.DataFrame(columns=DAILY_COLUMNS)
         try:
-            df = ak.stock_zh_a_hist_tx(
+            df = _with_retry(lambda: ak.stock_zh_a_hist_tx(
                 symbol=_market_symbol(full),
                 start_date=start,
                 end_date=end,
                 adjust=adjust,
-            )
+            ))
             out = rename_and_select(df, _TX_DAILY_MAPPING, DAILY_COLUMNS)
             out = _with_derived_ohlc(out)
         except Exception:
             try:
-                df = ak.stock_zh_a_hist(
+                df = _with_retry(lambda: ak.stock_zh_a_hist(
                     symbol=plain,
                     period="daily",
                     start_date=start,
                     end_date=end,
                     adjust=adjust,
-                )
+                ))
                 out = rename_and_select(df, _DAILY_MAPPING, DAILY_COLUMNS)
             except Exception:
                 return out
@@ -261,15 +275,15 @@ class AkshareProvider(MarketDataProvider):
             full = to_ts_code(code)
             wanted[to_plain_code(full)] = full
 
-        # 仅单票接口，不再回退全市场 spot（会触发东财多页 tqdm）
+        # 仅单票接口，不再回退全市场 spot（会触发东财多页 tqdm）；各源独立重试
         rows = []
         try:
-            rows = _fetch_quotes_sina(wanted)
+            rows = _with_retry(lambda: _fetch_quotes_sina(wanted))
         except Exception:
             rows = []
         if not rows:
             try:
-                rows = _fetch_quotes_tencent(wanted)
+                rows = _with_retry(lambda: _fetch_quotes_tencent(wanted))
             except Exception:
                 rows = []
         return pd.DataFrame(rows, columns=REALTIME_COLUMNS)
