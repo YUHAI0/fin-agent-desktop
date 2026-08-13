@@ -1795,6 +1795,14 @@ app.whenReady().then(() => {
     return await makeApiRequest('/config')
   })
 
+  ipcMain.handle('get-profile', async () => {
+    return await makeApiRequest('/profile')
+  })
+
+  ipcMain.handle('save-profile', async (_, data) => {
+    return await makeApiRequest('/profile', 'POST', data)
+  })
+
   ipcMain.handle('open-external', async (_, url: string) => {
     const target = typeof url === 'string' ? url.trim() : ''
     if (!target) {

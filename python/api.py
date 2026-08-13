@@ -470,6 +470,32 @@ def _is_csrf_protected_path(path):
     return any(path.startswith(prefix) for prefix in _CSRF_PROTECTED_PREFIXES)
 
 
+@route("GET", "/profile")
+def handle_profile_get(req):
+    from fin_agent.tools.profile_tools import get_profile_manager
+    pm = get_profile_manager()
+    return {"profile": pm.get_profile(), "completeness": pm.completeness()}
+
+
+@route("POST", "/profile")
+def handle_profile_save(req):
+    from fin_agent.tools.profile_tools import get_profile_manager
+    pm = get_profile_manager()
+    body = req.body or {}
+    try:
+        pm.update_profile(
+            risk_tolerance=body.get("risk_tolerance"),
+            investment_horizon=body.get("investment_horizon"),
+            favorite_sectors=body.get("favorite_sectors"),
+            avoid_sectors=body.get("avoid_sectors"),
+            investment_style=body.get("investment_style"),
+            experience_level=body.get("experience_level"),
+        )
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+    return {"success": True, "profile": pm.get_profile(), "completeness": pm.completeness()}
+
+
 @route("GET", "/config")
 def handle_get_config(req):
     Config.load()

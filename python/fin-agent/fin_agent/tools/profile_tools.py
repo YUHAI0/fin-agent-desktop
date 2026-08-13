@@ -10,7 +10,7 @@ def get_profile_manager():
         _profile_manager = UserProfileManager()
     return _profile_manager
 
-def update_user_profile(risk_tolerance=None, investment_horizon=None, favorite_sectors=None, avoid_sectors=None, investment_style=None):
+def update_user_profile(risk_tolerance=None, investment_horizon=None, favorite_sectors=None, avoid_sectors=None, investment_style=None, experience_level=None):
     """
     Update the user's investment profile and preferences.
     """
@@ -19,7 +19,8 @@ def update_user_profile(risk_tolerance=None, investment_horizon=None, favorite_s
         investment_horizon=investment_horizon,
         favorite_sectors=favorite_sectors,
         avoid_sectors=avoid_sectors,
-        investment_style=investment_style
+        investment_style=investment_style,
+        experience_level=experience_level
     )
 
 def get_user_profile():
@@ -61,6 +62,11 @@ PROFILE_TOOLS_SCHEMA = [
                     "investment_style": {
                         "type": "string",
                         "description": "A brief textual description of the user's investment style or specific preferences."
+                    },
+                    "experience_level": {
+                        "type": "string",
+                        "enum": ["beginner", "experienced", "Unknown"],
+                        "description": "User's investing experience: beginner, experienced, or Unknown."
                     }
                 },
                 "required": []

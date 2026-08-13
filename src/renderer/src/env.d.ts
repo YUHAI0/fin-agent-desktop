@@ -4,6 +4,21 @@ declare module '*.png' {
   export default src
 }
 
+interface UserProfile {
+  risk_tolerance: string
+  investment_horizon: string
+  favorite_sectors: string[]
+  avoid_sectors: string[]
+  investment_style: string
+  experience_level: 'beginner' | 'experienced' | 'Unknown'
+  custom_preferences: Record<string, unknown>
+}
+
+interface ProfileCompleteness {
+  score: number
+  missing: string[]
+}
+
 interface ConfigData {
     tushare_token: string
     provider: string
@@ -302,6 +317,13 @@ declare interface Window {
     checkConfig: () => Promise<{ configured: boolean; message?: string }>
     getConfig: () => Promise<ConfigData>
     saveConfig: (data: ConfigData) => Promise<{ success: boolean; error?: string; path?: string }>
+    getProfile: () => Promise<{ profile: UserProfile; completeness: ProfileCompleteness }>
+    saveProfile: (data: object) => Promise<{
+      success: boolean
+      profile?: UserProfile
+      completeness?: ProfileCompleteness
+      error?: string
+    }>
     openSettings: () => void
     resetConversationContext: () => void
     openExternal: (url: string) => Promise<{ success: boolean; error?: string }>
