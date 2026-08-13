@@ -470,6 +470,7 @@ declare interface Window {
     toastClick: () => void
     toastClose: () => void
     toastShown: () => void
+    focusMainPrefill: (text: string) => void
     startUpdateDownload: () => Promise<{ success?: boolean; error?: string; cancelled?: boolean }>
     installUpdate: () => Promise<{ success?: boolean; error?: string }>
     updateToastDismiss: () => void

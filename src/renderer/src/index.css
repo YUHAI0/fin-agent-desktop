@@ -1268,6 +1268,24 @@ body {
     color: color-mix(in srgb, var(--fa-text) 78%, var(--fa-muted));
   }
 
+  .fa-toast-analyze {
+    margin-top: 8px;
+    display: inline-flex;
+    align-items: center;
+    cursor: pointer;
+    border-radius: 6px;
+    border: 1px solid color-mix(in srgb, var(--fa-accent) 35%, transparent);
+    background: var(--fa-accent-soft);
+    color: var(--fa-accent);
+    font-size: 11px;
+    line-height: 1.2;
+    padding: 4px 8px;
+  }
+
+  .fa-toast-analyze:hover {
+    opacity: 0.88;
+  }
+
   .fa-toast-close {
     flex-shrink: 0;
     width: 22px;

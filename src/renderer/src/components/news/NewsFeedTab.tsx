@@ -11,6 +11,7 @@ import {
   normalizeNewsUrl,
   sentimentBadgeClass
 } from '../../utils/news'
+import { matchNewsToHoldings, type NewsHolding } from '../../utils/newsPortfolioMatch'
 
 const PAGE_SIZE = 20
 
@@ -55,6 +56,7 @@ const NewsFeedTab: React.FC<NewsFeedTabProps> = ({
   const [monitorStatus, setMonitorStatus] = useState<NewsMonitorStatus | null>(null)
   const [manualRefreshing, setManualRefreshing] = useState(false)
   const [highlightId, setHighlightId] = useState('')
+  const [holdings, setHoldings] = useState<NewsHolding[]>([])
 
   const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map())
   const skipFirstManualToken = useRef(true)
@@ -143,6 +145,24 @@ const NewsFeedTab: React.FC<NewsFeedTabProps> = ({
   useEffect(() => {
     void loadMonitorStatus()
   }, [loadMonitorStatus])
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const detail = await window.api.getPortfolioDetail()
+        if (cancelled) return
+        setHoldings(
+          (detail.positions || []).map((p) => ({ ts_code: p.ts_code, name: p.name }))
+        )
+      } catch {
+        if (!cancelled) setHoldings([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const performManualRefresh = useCallback(async () => {
     setManualRefreshing(true)
@@ -451,6 +471,8 @@ const NewsFeedTab: React.FC<NewsFeedTabProps> = ({
               const matchedSubs = (item.matched_subscription_ids || [])
                 .map((id) => subscriptionNameMap.get(id))
                 .filter((s): s is NewsSubscription => Boolean(s))
+              const holdingRelated =
+                matchNewsToHoldings(`${item.title}\n${item.summary || ''}`, holdings).length > 0
               const isHighlighted = highlightId === item.id
               const linkable = hasNewsUrl(item)
               return (
@@ -516,6 +538,7 @@ const NewsFeedTab: React.FC<NewsFeedTabProps> = ({
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--fa-faint)]">
                       <span>{NEWS_SOURCE_LABELS[item.source] || item.source}</span>
                       <span>{formatNewsTime(item.published_at)}</span>
+                      {holdingRelated && <span className="fa-news-tag">持仓相关</span>}
                       {matchedSubs.map((sub) => (
                         <span key={sub.id} className="fa-news-tag">
                           {sub.name}

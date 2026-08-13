@@ -1,6 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Bell, X, ArrowUpRight } from 'lucide-react'
 import { NEWS_SENTIMENT_LABELS, sentimentBadgeClass } from '../utils/news'
+import { buildNewsImpactPrefill } from '../utils/chatPrefill'
 
 type NewsSentiment = 'bullish' | 'bearish' | 'neutral'
 
@@ -151,6 +152,15 @@ export default function ToastView(): JSX.Element {
     window.api.toastClose?.()
   }
 
+  const handleAnalyze = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!payload) return
+    const text = buildNewsImpactPrefill(payload._title || '', payload._body || '')
+    window.api.focusMainPrefill?.(text)
+    setVisible(false)
+    window.api.toastClose?.()
+  }
+
   const isNews = payload?.type === 'news' || !!payload?.news_id || !!payload?.merged
   const isPriceAlert = payload?.type === 'price_alert'
   const isAppUpdate = payload?.type === 'app_update'
@@ -187,6 +197,15 @@ export default function ToastView(): JSX.Element {
             <div className="fa-toast-title">{payload._title}</div>
             {payload._body && (
               <div className="fa-toast-body">{payload._body}</div>
+            )}
+            {isNews && (
+              <button
+                type="button"
+                className="fa-toast-analyze"
+                onClick={handleAnalyze}
+              >
+                分析对持仓影响
+              </button>
             )}
           </div>
 

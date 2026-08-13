@@ -58,7 +58,7 @@ const TOAST_NEWS_WIDTH = 440
 /** 新闻 Toast 创建时的占位高度，渲染后按内容自适应 */
 const TOAST_NEWS_INITIAL_HEIGHT = 120
 const TOAST_NEWS_MIN_HEIGHT = 88
-const TOAST_NEWS_MAX_HEIGHT = 280
+const TOAST_NEWS_MAX_HEIGHT = 312
 const TOAST_MARGIN = 16
 const TOAST_DURATION_MS = 30000
 const TOAST_MAX_STACK = 5
@@ -531,13 +531,18 @@ function confirmNotificationDelivery(
   }
 }
 
-function handleNotificationActivation(notif: DesktopNotificationPayload): void {
-  if (!chatWindow) return
+function focusChatWindow(): boolean {
+  if (!chatWindow || chatWindow.isDestroyed()) return false
   if (chatWindow.isMinimized()) {
     chatWindow.restore()
   }
   chatWindow.show()
   chatWindow.focus()
+  return true
+}
+
+function handleNotificationActivation(notif: DesktopNotificationPayload): void {
+  if (!focusChatWindow() || !chatWindow) return
   if (notif.type === 'price_alert') {
     const tsCode = (notif.ts_code || '').trim()
     if (tsCode) {
@@ -2146,6 +2151,16 @@ app.whenReady().then(() => {
   ipcMain.handle('get-pending-toast', (event) => {
     const entry = pendingToasts.get(event.sender.id)
     return entry?.payload ?? null
+  })
+
+  ipcMain.on('focus-main-prefill', (_event, text: string) => {
+    const value = typeof text === 'string' ? text.trim() : ''
+    if (!value) return
+    if (!focusChatWindow() || !chatWindow) return
+    chatWindow.webContents.send(
+      'navigate-route',
+      `/chat?prefill=${encodeURIComponent(value)}`
+    )
   })
 
   ipcMain.on('toast-shown', (event) => {

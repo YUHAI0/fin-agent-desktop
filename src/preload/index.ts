@@ -230,6 +230,7 @@ const api = {
   onUpdateDownloadError: (cb: (err: string) => void) => onUpdateDownloadErrorBridge(cb),
   toastClick: () => ipcRenderer.send('toast-click'),
   toastClose: () => ipcRenderer.send('toast-close'),
+  focusMainPrefill: (text: string) => ipcRenderer.send('focus-main-prefill', text),
   toastShown: () => ipcRenderer.send('toast-shown'),
   debugShowToast: () => ipcRenderer.invoke('debug-show-toast'),
   getPendingToast: () =>
