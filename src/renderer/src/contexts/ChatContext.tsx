@@ -222,6 +222,14 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     [isActiveSessionStreaming, navigate, newSession]
   )
 
+  // Toast 等跨窗口预填：走 requestPrefill，避免 navigate-route ?prefill= 绕过流式保护
+  useEffect(() => {
+    const remove = window.api.onChatPrefill?.((text: string) => {
+      void requestPrefill(text)
+    })
+    return () => remove?.()
+  }, [requestPrefill])
+
   const ensureActiveSession = useCallback(
     async (seedTitle?: string) => {
       const current = activeSessionIdRef.current

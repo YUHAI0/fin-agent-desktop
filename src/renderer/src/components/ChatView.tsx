@@ -208,7 +208,9 @@ const ChatView: React.FC = () => {
     updateSessionMessages,
     activeSessionId,
     ensureActiveSession,
-    setSessionStreaming
+    setSessionStreaming,
+    isActiveSessionStreaming,
+    newSession
   } = useChat() // 使用 Context 中的消息历史
   const { theme, setTheme } = useTheme()
   const [input, setInput] = useState('')
@@ -231,6 +233,10 @@ const ChatView: React.FC = () => {
   ensureActiveSessionRef.current = ensureActiveSession
   const setSessionStreamingRef = useRef(setSessionStreaming)
   setSessionStreamingRef.current = setSessionStreaming
+  const isActiveSessionStreamingRef = useRef(isActiveSessionStreaming)
+  isActiveSessionStreamingRef.current = isActiveSessionStreaming
+  const newSessionRef = useRef(newSession)
+  newSessionRef.current = newSession
   const sendUserTextRef = useRef<(text: string) => Promise<void>>(async () => {})
   const lastPrefillConsumedRef = useRef<{ text: string; at: number } | null>(null)
 
@@ -808,8 +814,13 @@ const ChatView: React.FC = () => {
     const last = lastPrefillConsumedRef.current
     if (last && last.text === text && now - last.at < 800) return
     lastPrefillConsumedRef.current = { text, at: now }
-    setInput(text)
-    void sendUserTextRef.current(text)
+    void (async () => {
+      if (isActiveSessionStreamingRef.current()) {
+        await newSessionRef.current()
+      }
+      setInput(text)
+      await sendUserTextRef.current(text)
+    })()
   }
 
   // 预填：自定义事件 + ?prefill= query + sessionStorage 交接

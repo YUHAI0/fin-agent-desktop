@@ -2157,10 +2157,7 @@ app.whenReady().then(() => {
     const value = typeof text === 'string' ? text.trim() : ''
     if (!value) return
     if (!focusChatWindow() || !chatWindow) return
-    chatWindow.webContents.send(
-      'navigate-route',
-      `/chat?prefill=${encodeURIComponent(value)}`
-    )
+    chatWindow.webContents.send('chat-prefill', value)
   })
 
   ipcMain.on('toast-shown', (event) => {

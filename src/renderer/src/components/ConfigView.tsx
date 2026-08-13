@@ -105,6 +105,7 @@ const ConfigView: React.FC = () => {
   const [completeness, setCompleteness] = useState<ProfileCompleteness>({ score: 0, missing: [] })
   const [profileSaving, setProfileSaving] = useState(false)
   const [profileError, setProfileError] = useState('')
+  const [profileReady, setProfileReady] = useState(false)
 
   const handleProviderChange = (newProvider: string) => {
     setProvider(newProvider)
@@ -114,6 +115,42 @@ const ConfigView: React.FC = () => {
         setOpenaiBase(preset.baseUrl)
         setOpenaiModel(preset.model)
       }
+    }
+  }
+
+  const applyProfileResult = (profile?: UserProfile, nextCompleteness?: ProfileCompleteness) => {
+    if (profile) {
+      setExperienceLevel(pickEnum(profile.experience_level, EXPERIENCE_OPTIONS, 'Unknown'))
+      setRiskTolerance(pickEnum(profile.risk_tolerance, RISK_OPTIONS, 'Unknown'))
+      setInvestmentHorizon(pickEnum(profile.investment_horizon, HORIZON_OPTIONS, 'Unknown'))
+      setFavoriteSectors(joinSectors(profile.favorite_sectors))
+      setAvoidSectors(joinSectors(profile.avoid_sectors))
+      setInvestmentStyle(profile.investment_style || '')
+    }
+    if (nextCompleteness) {
+      setCompleteness({
+        score: Number(nextCompleteness.score) || 0,
+        missing: Array.isArray(nextCompleteness.missing) ? nextCompleteness.missing : []
+      })
+    }
+  }
+
+  const loadProfile = async () => {
+    try {
+      const result = await window.api.getProfile()
+      const profile = result?.profile
+      if (!profile) {
+        setProfileReady(false)
+        setProfileError('加载投资画像失败，请重试后再保存，以免覆盖现有画像')
+        return
+      }
+      applyProfileResult(profile, result.completeness)
+      setProfileReady(true)
+      setProfileError('')
+    } catch (err: any) {
+      console.error('Failed to load profile:', err)
+      setProfileReady(false)
+      setProfileError(err?.message || '加载投资画像失败，请重试后再保存，以免覆盖现有画像')
     }
   }
 
@@ -148,51 +185,13 @@ const ConfigView: React.FC = () => {
         console.error('Failed to load config:', err)
       }
     }
-    const loadProfile = async () => {
-      try {
-        const result = await window.api.getProfile()
-        const profile = result?.profile
-        if (profile) {
-          setExperienceLevel(pickEnum(profile.experience_level, EXPERIENCE_OPTIONS, 'Unknown'))
-          setRiskTolerance(pickEnum(profile.risk_tolerance, RISK_OPTIONS, 'Unknown'))
-          setInvestmentHorizon(pickEnum(profile.investment_horizon, HORIZON_OPTIONS, 'Unknown'))
-          setFavoriteSectors(joinSectors(profile.favorite_sectors))
-          setAvoidSectors(joinSectors(profile.avoid_sectors))
-          setInvestmentStyle(profile.investment_style || '')
-        }
-        if (result?.completeness) {
-          setCompleteness({
-            score: Number(result.completeness.score) || 0,
-            missing: Array.isArray(result.completeness.missing) ? result.completeness.missing : []
-          })
-        }
-      } catch (err) {
-        console.error('Failed to load profile:', err)
-      }
-    }
     loadConfig()
-    loadProfile()
+    void loadProfile()
   }, [])
-
-  const applyProfileResult = (profile?: UserProfile, nextCompleteness?: ProfileCompleteness) => {
-    if (profile) {
-      setExperienceLevel(pickEnum(profile.experience_level, EXPERIENCE_OPTIONS, 'Unknown'))
-      setRiskTolerance(pickEnum(profile.risk_tolerance, RISK_OPTIONS, 'Unknown'))
-      setInvestmentHorizon(pickEnum(profile.investment_horizon, HORIZON_OPTIONS, 'Unknown'))
-      setFavoriteSectors(joinSectors(profile.favorite_sectors))
-      setAvoidSectors(joinSectors(profile.avoid_sectors))
-      setInvestmentStyle(profile.investment_style || '')
-    }
-    if (nextCompleteness) {
-      setCompleteness({
-        score: Number(nextCompleteness.score) || 0,
-        missing: Array.isArray(nextCompleteness.missing) ? nextCompleteness.missing : []
-      })
-    }
-  }
 
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!profileReady) return
     setProfileSaving(true)
     setProfileError('')
     try {
@@ -367,7 +366,16 @@ const ConfigView: React.FC = () => {
 
           {profileError && (
             <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-red-300">
-              {profileError}
+              <p>{profileError}</p>
+              {!profileReady && (
+                <button
+                  type="button"
+                  className="fa-btn-ghost mt-2"
+                  onClick={() => void loadProfile()}
+                >
+                  重新加载
+                </button>
+              )}
             </div>
           )}
 
@@ -438,10 +446,10 @@ const ConfigView: React.FC = () => {
 
           <button
             type="submit"
-            disabled={profileSaving}
+            disabled={profileSaving || !profileReady}
             className="fa-btn-primary w-full py-3"
           >
-            {profileSaving ? '保存中...' : '保存画像'}
+            {profileSaving ? '保存中...' : profileReady ? '保存画像' : '画像未加载'}
           </button>
         </form>
 

@@ -360,6 +360,7 @@ declare interface Window {
     onQuitConfirm: (callback: () => void) => () => void
     quitConfirmed: (confirmed: boolean) => void
     onNavigate: (callback: (route: string) => void) => () => void
+    onChatPrefill: (callback: (text: string) => void) => () => void
     suspendShortcut: () => Promise<void>
     resumeShortcut: () => Promise<void>
     checkShortcut: (shortcut: string) => Promise<boolean>

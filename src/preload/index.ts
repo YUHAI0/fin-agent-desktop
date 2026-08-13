@@ -29,6 +29,7 @@ const onBotStreamBridge = createChannelBridge<any>('bot-stream')
 const onFocusInputBridge = createChannelBridge<void>('focus-input')
 const onQuitConfirmBridge = createChannelBridge<void>('quit-confirm')
 const onNavigateBridge = createChannelBridge<string>('navigate-route')
+const onChatPrefillBridge = createChannelBridge<string>('chat-prefill')
 const onNewsNotificationOpenBridge = createChannelBridge<{
   newsId?: string
   subscriptionId?: string
@@ -129,6 +130,7 @@ const api = {
     callback: (payload: { text: string; sessionId?: string } | string) => void
   ) => onNewMessageBridge(callback),
   onNavigate: (callback: (route: string) => void) => onNavigateBridge(callback),
+  onChatPrefill: (callback: (text: string) => void) => onChatPrefillBridge(callback),
   onBotResponse: (callback: (data: any) => void) => onBotResponseBridge(callback),
   onBotStream: (callback: (data: any) => void) => onBotStreamBridge(callback),
   onFocusInput: (callback: () => void) => onFocusInputBridge(callback),
