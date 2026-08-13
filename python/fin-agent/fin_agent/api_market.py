@@ -11,13 +11,15 @@ from fin_agent.datasources.normalize import normalize_date, to_plain_code, to_ts
 SEARCH_LIMIT = 20
 FINANCIALS_LIMIT = 8
 MONEYFLOW_DAYS = 14
-KLINE_LOOKBACK_DAYS = 420
+KLINE_LOOKBACK_DAYS = 2000  # 覆盖约 5 年交易日缓冲
 
 PERIOD_DAYS = {
     "1M": 31,
     "3M": 93,
     "6M": 186,
     "1Y": 370,
+    "3Y": 365 * 3 + 30,
+    "5Y": 365 * 5 + 30,
 }
 
 

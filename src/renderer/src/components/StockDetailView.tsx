@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Loader2, RefreshCw } from 'lucide-react'
+import { ArrowLeft, Loader2, RefreshCw, Sparkles } from 'lucide-react'
 import type { CandlestickData } from 'lightweight-charts'
 import SubPageShell from './SubPageShell'
 import { KlinePanel } from './KlinePanel'
+import { useChat } from '../contexts/ChatContext'
+import { buildAnalyzeStockPrefill } from '../utils/chatPrefill'
 
-type KlinePeriod = '1M' | '3M' | '6M' | '1Y'
+type KlinePeriod = '1M' | '3M' | '6M' | '1Y' | '3Y' | '5Y'
 
 type SectionState<T> = {
   loading: boolean
@@ -14,7 +16,7 @@ type SectionState<T> = {
   data: T | null
 }
 
-const PERIODS: KlinePeriod[] = ['1M', '3M', '6M', '1Y']
+const PERIODS: KlinePeriod[] = ['1M', '3M', '6M', '1Y', '3Y', '5Y']
 
 const money = (n: number | null | undefined, digits = 2) => {
   if (n == null || !Number.isFinite(n)) return '—'
@@ -51,6 +53,7 @@ function emptySection<T>(): SectionState<T> {
 
 const StockDetailView: React.FC = () => {
   const navigate = useNavigate()
+  const { requestPrefill } = useChat()
   const params = useParams()
   const tsCode = decodeURIComponent(params.tsCode || '').trim().toUpperCase()
 
@@ -131,6 +134,12 @@ const StockDetailView: React.FC = () => {
     void loadMoneyflow(tsCode)
   }, [tsCode, period, loadQuote, loadKline, loadValuation, loadFinancials, loadMoneyflow])
 
+  const handleAnalyze = useCallback(async () => {
+    if (!tsCode) return
+    const text = buildAnalyzeStockPrefill(tsCode, quote.data?.name)
+    await requestPrefill(text)
+  }, [tsCode, quote.data?.name, requestPrefill])
+
   useEffect(() => {
     if (!tsCode) return
     void loadQuote(tsCode)
@@ -190,15 +199,27 @@ const StockDetailView: React.FC = () => {
           <div className="truncate text-sm font-semibold">{titleName}</div>
           <div className="font-mono text-[11px] text-[var(--fa-faint)]">{tsCode}</div>
         </div>
-        <button
-          type="button"
-          className="fa-icon-btn"
-          onClick={refreshAll}
-          title="刷新"
-          aria-label="刷新"
-        >
-          <RefreshCw size={16} />
-        </button>
+        <div className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            className="fa-icon-btn inline-flex items-center gap-1 px-2 text-[11px] font-medium"
+            onClick={() => void handleAnalyze()}
+            title="让 Agent 分析此股"
+            aria-label="让 Agent 分析此股"
+          >
+            <Sparkles size={14} />
+            让 Agent 分析此股
+          </button>
+          <button
+            type="button"
+            className="fa-icon-btn"
+            onClick={refreshAll}
+            title="刷新"
+            aria-label="刷新"
+          >
+            <RefreshCw size={16} />
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 space-y-4 overflow-y-auto px-4 pb-6">
@@ -264,7 +285,7 @@ const StockDetailView: React.FC = () => {
         <section>
           <div className="mb-2 flex items-center justify-between gap-2">
             <h3 className="text-xs font-medium text-[var(--fa-muted)]">日 K</h3>
-            <div className="flex gap-1">
+            <div className="flex flex-wrap justify-end gap-1">
               {PERIODS.map((p) => (
                 <button
                   key={p}
