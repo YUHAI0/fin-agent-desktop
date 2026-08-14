@@ -1,5 +1,6 @@
 from fin_agent.scheduler import TaskScheduler
 from fin_agent.config import Config
+from fin_agent.alert_copy import format_condition_label
 
 scheduler = TaskScheduler()
 
@@ -38,7 +39,8 @@ def list_alerts():
     for t in tasks:
         status = "Active" if t.get('enabled', True) else "Fired/Disabled"
         if t['type'] == 'price_alert':
-            result += f"- [{status}] {t['ts_code']} Price {t['operator']} {t['threshold']} (ID: {t['id']})\n"
+            label = format_condition_label(t)
+            result += f"- [{status}] {t.get('ts_code')} · {label} (ID: {t['id']})\n"
         else:
             result += f"- [{status}] Unknown Task Type (ID: {t['id']})\n"
     return result

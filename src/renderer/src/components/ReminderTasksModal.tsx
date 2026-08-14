@@ -21,6 +21,7 @@ type SchedulerTask = {
   current_price?: number | null
   change?: number | null
   pct_chg?: number | null
+  condition_label?: string
 }
 
 type AlertHistoryRow = {
@@ -32,6 +33,8 @@ type AlertHistoryRow = {
   threshold?: number
   price?: number
   triggered_at?: number
+  message?: string
+  condition_label?: string
 }
 
 type ReminderTab = 'current' | 'history'
@@ -63,11 +66,34 @@ function changeColorClass(change: number | null | undefined): string {
 }
 
 function describeTask(t: SchedulerTask): string {
-  if (t.type === 'price_alert' && t.ts_code && t.operator != null && t.threshold != null) {
+  if (t.type === 'price_alert' && t.ts_code) {
     const name = t.stock_name ? `${t.stock_name} ` : ''
-    return `${name}${t.ts_code} 价格 ${t.operator} ${t.threshold}`
+    const cond =
+      t.condition_label ||
+      (t.operator != null && t.threshold != null ? `价格 ${t.operator} ${t.threshold}` : '')
+    return `${name}${t.ts_code}${cond ? ` · ${cond}` : ''}`
   }
   return t.type ? `${t.type}（${t.id}）` : t.id
+}
+
+function formatTaskCondition(t: {
+  condition_label?: string
+  operator?: string
+  threshold?: number
+}): string {
+  if (t.condition_label) return t.condition_label
+  if (t.operator != null && t.threshold != null) {
+    return `价格 ${t.operator} ${t.threshold}`
+  }
+  return '—'
+}
+
+function formatHistoryDetail(item: AlertHistoryRow): string {
+  if (item.message) return item.message
+  if (item.operator != null && item.threshold != null) {
+    return `价格 ${item.operator} ${item.threshold}`
+  }
+  return '—'
 }
 
 export const ReminderTasksModal: React.FC<ReminderTasksModalProps> = ({ open, onClose }) => {
@@ -439,7 +465,7 @@ export const ReminderTasksModal: React.FC<ReminderTasksModalProps> = ({ open, on
                               )}
                             </div>
                             <div className="mt-1.5 text-xs text-[var(--fa-muted)]">
-                              条件：价格 {t.operator} {t.threshold}
+                              条件：{formatTaskCondition(t)}
                               {t.email ? ` · ${t.email}` : ''}
                             </div>
                             <div className="mt-0.5 text-[11px] text-[var(--fa-faint)]">
@@ -520,7 +546,7 @@ export const ReminderTasksModal: React.FC<ReminderTasksModalProps> = ({ open, on
                           )}
                         </div>
                         <div className="mt-1.5 text-xs text-[var(--fa-muted)]">
-                          条件：价格 {item.operator} {item.threshold}
+                          {formatHistoryDetail(item)}
                           {item.price != null && Number.isFinite(item.price)
                             ? ` · 触发价 ${formatPrice(item.price)}`
                             : ''}
