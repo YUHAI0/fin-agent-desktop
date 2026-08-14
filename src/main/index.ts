@@ -347,11 +347,26 @@ function createToastWindowOnDisplay(
   win.webContents.on('did-finish-load', () => {
     console.log(`[Toast] did-finish-load id=${contentsId}, sending toast-show`)
     win.webContents.send('toast-show', toastPayload)
-    // 兜底：若渲染层未回调，超时后仍揭幕，避免永远不显示
-    setTimeout(() => {
+    // 内容未就绪时重发，绝不空窗揭幕；超时仍无 toast-shown 则关闭并释放 inFlight 以便重试
+    const retryShow = setTimeout(() => {
       const entry = pendingToasts.get(contentsId)
-      if (entry && !entry.revealed) startReveal()
-    }, 1200)
+      if (!entry || entry.revealed || win.isDestroyed()) return
+      console.warn(`[Toast] resend toast-show id=${contentsId} (no toast-shown yet)`)
+      win.webContents.send('toast-show', toastPayload)
+    }, 800)
+    const failSafeClose = setTimeout(() => {
+      const entry = pendingToasts.get(contentsId)
+      if (!entry || entry.revealed || win.isDestroyed()) return
+      console.error(
+        `[Toast] abort blank toast id=${contentsId} title="${payload._title}" — content never confirmed`
+      )
+      clearTimeout(timerId)
+      closeToast()
+    }, 3500)
+    win.once('closed', () => {
+      clearTimeout(retryShow)
+      clearTimeout(failSafeClose)
+    })
   })
 
   win.webContents.on('did-fail-load', (_e, code, desc) => {

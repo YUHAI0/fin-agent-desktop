@@ -85,9 +85,11 @@ export default function ToastView(): JSX.Element {
 
     // electronBus 回调只有 data 一个参数（不是 Node 风格的 event, data）
     const onShow = (data: ToastPayload) => {
-      if (!data?._title && !data?._body) return
+      const title = typeof data?._title === 'string' ? data._title.trim() : ''
+      const body = typeof data?._body === 'string' ? data._body.trim() : ''
+      if (!title && !body) return
       shownSentRef.current = false
-      setPayload(data)
+      setPayload({ ...data, _title: data._title || title, _body: data._body || body })
       requestAnimationFrame(() => setVisible(true))
     }
 
@@ -123,16 +125,17 @@ export default function ToastView(): JSX.Element {
       const h = Math.ceil(
         Math.max(root.scrollHeight || 0, root.offsetHeight || 0)
       )
+      const confirmShown = () => {
+        if (!shownSentRef.current) {
+          shownSentRef.current = true
+          window.api.toastShown?.()
+        }
+      }
       if (h > 0) {
-        void window.api.resizeToast?.(h).finally(() => {
-          if (!shownSentRef.current) {
-            shownSentRef.current = true
-            window.api.toastShown?.()
-          }
-        })
-      } else if (!shownSentRef.current) {
-        shownSentRef.current = true
-        window.api.toastShown?.()
+        void window.api.resizeToast?.(h).finally(confirmShown)
+      } else {
+        // 高度尚未量到也先确认内容已渲染，避免主进程空窗超时关闭
+        confirmShown()
       }
     }
 

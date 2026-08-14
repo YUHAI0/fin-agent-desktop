@@ -57,6 +57,8 @@ const onUpdateDownloadErrorBridge = createChannelBridge<string>('update-download
 // Toast 浮窗事件（仅在 /toast 路由窗口使用）
 type ToastBusListener = (data: any) => void
 const toastBusListeners = new Map<string, Set<ToastBusListener>>()
+/** 缓存最近一次 show 载荷，避免 React 订阅前 toast-show 丢失导致空白窗 */
+const lastToastBusPayload = new Map<string, unknown>()
 const ELECTRON_BUS_CHANNELS = [
   'toast-show',
   'toast-dismiss',
@@ -69,6 +71,13 @@ const ELECTRON_BUS_CHANNELS = [
 for (const ch of ELECTRON_BUS_CHANNELS) {
   ipcRenderer.removeAllListeners(ch)
   ipcRenderer.on(ch, (_event, data) => {
+    if (ch === 'toast-show' || ch === 'update-show') {
+      lastToastBusPayload.set(ch, data)
+    } else if (ch === 'toast-dismiss') {
+      lastToastBusPayload.delete('toast-show')
+    } else if (ch === 'update-dismiss') {
+      lastToastBusPayload.delete('update-show')
+    }
     const listeners = toastBusListeners.get(ch)
     if (listeners) for (const cb of listeners) cb(data)
   })
@@ -77,6 +86,16 @@ const electronBus = {
   on(channel: string, cb: ToastBusListener): () => void {
     if (!toastBusListeners.has(channel)) toastBusListeners.set(channel, new Set())
     toastBusListeners.get(channel)!.add(cb)
+    // 订阅时若已有缓存 show 载荷，立即回放（解决挂载前 IPC 已发出的竞态）
+    if (
+      (channel === 'toast-show' || channel === 'update-show') &&
+      lastToastBusPayload.has(channel)
+    ) {
+      const cached = lastToastBusPayload.get(channel)
+      queueMicrotask(() => {
+        if (toastBusListeners.get(channel)?.has(cb)) cb(cached)
+      })
+    }
     return () => toastBusListeners.get(channel)?.delete(cb)
   }
 }
