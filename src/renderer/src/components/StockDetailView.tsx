@@ -136,7 +136,7 @@ const StockDetailView: React.FC = () => {
 
   const handleAnalyze = useCallback(async () => {
     if (!tsCode) return
-    const text = buildAnalyzeStockPrefill(tsCode, quote.data?.name)
+    const text = buildAnalyzeStockPrefill(tsCode, quote.data?.name ?? undefined)
     await requestPrefill(text)
   }, [tsCode, quote.data?.name, requestPrefill])
 

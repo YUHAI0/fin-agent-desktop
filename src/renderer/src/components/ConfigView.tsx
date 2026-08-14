@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, ExternalLink } from 'lucide-react'
-import { useAppDialog } from '../contexts/AppDialogContext'
 import FaSelect from './FaSelect'
 import SubPageShell from './SubPageShell'
 
@@ -26,7 +25,6 @@ function normalizeNewsPollInterval(value: unknown): 5 | 10 | 15 | 30 {
 
 const ConfigView: React.FC = () => {
   const navigate = useNavigate()
-  const { alert } = useAppDialog()
   const [dataSource, setDataSource] = useState<'akshare' | 'tushare'>('akshare')
   const [tushareToken, setTushareToken] = useState('')
   const [provider, setProvider] = useState('deepseek')
