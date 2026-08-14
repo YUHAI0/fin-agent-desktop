@@ -24,6 +24,9 @@ class Config:
     OPENAI_API_KEY = None
     OPENAI_BASE_URL = None
     OPENAI_MODEL = None
+
+    # Local LLM backend preset (ollama | lmstudio | custom)
+    LOCAL_BACKEND = None
     
     # App Config
     WAKE_UP_SHORTCUT = None
@@ -143,6 +146,10 @@ class Config:
         cls.OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
         cls.OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL")
         cls.OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
+
+        cls.LOCAL_BACKEND = os.getenv("LOCAL_BACKEND")
+        if cls.LLM_PROVIDER == "local" and not cls.LOCAL_BACKEND:
+            cls.LOCAL_BACKEND = cls.infer_local_backend(cls.OPENAI_BASE_URL or "")
         
         # Load app config
         app_config = cls.load_app_config()
@@ -263,8 +270,18 @@ class Config:
         print(f"Email configuration saved to {cls.get_env_path()}")
         return True
 
+    @staticmethod
+    def infer_local_backend(base_url):
+        """Infer local backend preset from base URL port."""
+        url = (base_url or "").strip().lower()
+        if ":11434" in url:
+            return "ollama"
+        if ":1234" in url:
+            return "lmstudio"
+        return "custom"
+
     @classmethod
-    def update_core_config(cls, tushare_token, provider, deepseek_key, deepseek_base, deepseek_model, openai_key, openai_base, openai_model, wake_up_shortcut):
+    def update_core_config(cls, tushare_token, provider, deepseek_key, deepseek_base, deepseek_model, openai_key, openai_base, openai_model, wake_up_shortcut, local_backend=None):
         """Update core configuration (Tushare & LLM) in the .env file."""
         env_file = cls.get_env_path()
         
@@ -279,7 +296,7 @@ class Config:
         keys_to_remove = ["TUSHARE_TOKEN", "LLM_PROVIDER", 
                           "DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL", "DEEPSEEK_MODEL",
                           "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL",
-                          "WAKE_UP_SHORTCUT"]
+                          "LOCAL_BACKEND", "WAKE_UP_SHORTCUT"]
         
         new_lines = []
         for line in lines:
@@ -304,6 +321,12 @@ class Config:
             core_config.append(f"DEEPSEEK_API_KEY={deepseek_key}\n")
             core_config.append(f"DEEPSEEK_BASE_URL={deepseek_base}\n")
             core_config.append(f"DEEPSEEK_MODEL={deepseek_model}\n")
+        elif provider == "local":
+            core_config.append(f"OPENAI_API_KEY={openai_key}\n")
+            core_config.append(f"OPENAI_BASE_URL={openai_base}\n")
+            core_config.append(f"OPENAI_MODEL={openai_model}\n")
+            resolved_backend = local_backend or cls.infer_local_backend(openai_base)
+            core_config.append(f"LOCAL_BACKEND={resolved_backend}\n")
         else:
             core_config.append(f"OPENAI_API_KEY={openai_key}\n")
             core_config.append(f"OPENAI_BASE_URL={openai_base}\n")
@@ -332,10 +355,23 @@ class Config:
             os.environ["DEEPSEEK_API_KEY"] = deepseek_key
             os.environ["DEEPSEEK_BASE_URL"] = deepseek_base
             os.environ["DEEPSEEK_MODEL"] = deepseek_model
+            if "LOCAL_BACKEND" in os.environ:
+                del os.environ["LOCAL_BACKEND"]
+            cls.LOCAL_BACKEND = None
+        elif provider == "local":
+            os.environ["OPENAI_API_KEY"] = openai_key
+            os.environ["OPENAI_BASE_URL"] = openai_base
+            os.environ["OPENAI_MODEL"] = openai_model
+            resolved_backend = local_backend or cls.infer_local_backend(openai_base)
+            os.environ["LOCAL_BACKEND"] = resolved_backend
+            cls.LOCAL_BACKEND = resolved_backend
         else:
             os.environ["OPENAI_API_KEY"] = openai_key
             os.environ["OPENAI_BASE_URL"] = openai_base
             os.environ["OPENAI_MODEL"] = openai_model
+            if "LOCAL_BACKEND" in os.environ:
+                del os.environ["LOCAL_BACKEND"]
+            cls.LOCAL_BACKEND = None
             
         cls.load()
 
@@ -506,7 +542,7 @@ class Config:
             "TUSHARE_TOKEN", "LLM_PROVIDER", 
             "DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL", "DEEPSEEK_MODEL",
             "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL",
-            "WAKE_UP_SHORTCUT"
+            "LOCAL_BACKEND", "WAKE_UP_SHORTCUT"
         ]
 
         def clean_env_file(file_path):
@@ -574,6 +610,7 @@ class Config:
         cls.OPENAI_API_KEY = None
         cls.OPENAI_BASE_URL = None
         cls.OPENAI_MODEL = None
+        cls.LOCAL_BACKEND = None
         cls.WAKE_UP_SHORTCUT = None
 
 # Load on module import

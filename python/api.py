@@ -520,7 +520,21 @@ def handle_get_config(req):
         "alert_trading_hours_only": Config.ALERT_TRADING_HOURS_ONLY,
         "news_poll_interval_minutes": Config.NEWS_POLL_INTERVAL_MINUTES,
         "news_sentiment_enabled": Config.NEWS_SENTIMENT_ENABLED,
+        "local_backend": Config.LOCAL_BACKEND or (
+            Config.infer_local_backend(Config.OPENAI_BASE_URL or "")
+            if Config.LLM_PROVIDER == "local"
+            else ""
+        ),
     }
+
+
+@route("GET", "/config/local-models")
+def handle_local_models(req):
+    backend = req.query.get("backend") or "ollama"
+    base_url = req.query.get("base_url") or ""
+    api_key = req.query.get("api_key") or None
+    from fin_agent.local_models import list_local_models
+    return list_local_models(backend, base_url, api_key)
 
 
 @route("GET", "/notifications/poll")
@@ -701,7 +715,8 @@ def handle_config_save(req):
         data.get('openai_key', ''),
         data.get('openai_base', ''),
         data.get('openai_model', ''),
-        data.get('wake_up_shortcut', 'Ctrl+Alt+Q')
+        data.get('wake_up_shortcut', 'Ctrl+Alt+Q'),
+        data.get('local_backend'),
     )
 
     email_server = data.get('email_server', '')
