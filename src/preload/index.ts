@@ -242,7 +242,8 @@ const api = {
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
   resizeUpdateToast: (height: number) => ipcRenderer.invoke('resize-update-toast', height),
   updateToastReady: () => ipcRenderer.send('update-toast-ready'),
-  resizeToast: (height: number) => ipcRenderer.invoke('resize-toast', height),
+  resizeToast: (height: number, variant?: 'news' | 'price_alert' | 'default') =>
+    ipcRenderer.invoke('resize-toast', height, variant),
   setToastChrome: (theme?: string) => ipcRenderer.invoke('set-toast-chrome', theme),
   startUpdateDownload: () => ipcRenderer.invoke('start-update-download'),
   installUpdate: () => ipcRenderer.invoke('install-update'),

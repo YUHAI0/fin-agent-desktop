@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, ExternalLink } from 'lucide-react'
 import FaSelect from './FaSelect'
@@ -11,7 +11,7 @@ const PROVIDER_PRESETS: Record<string, { label: string; baseUrl: string; model: 
   qwen: { label: 'Qwen (通义千问)', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus', keyUrl: 'https://dashscope.console.aliyun.com/apiKey', color: 'orange', keyPlaceholder: 'sk-...' },
   siliconflow: { label: 'SiliconFlow (硅基流动)', baseUrl: 'https://api.siliconflow.cn/v1', model: 'deepseek-ai/DeepSeek-V3', keyUrl: 'https://cloud.siliconflow.cn/account/ak', color: 'cyan', keyPlaceholder: 'sk-...' },
   openai: { label: 'OpenAI / 自定义', baseUrl: '', model: '', keyUrl: '', color: 'gray', keyPlaceholder: 'sk-...' },
-  local_ollama: { label: '本地模型 · Ollama', baseUrl: 'http://localhost:11434/v1', model: 'qwen2.5:7b', keyUrl: 'https://ollama.com/download', color: 'amber', keyPlaceholder: '可选，默认 ollama' },
+  local_ollama: { label: '本地模型 · Ollama', baseUrl: 'http://localhost:11434/v1', model: '', keyUrl: 'https://ollama.com/download', color: 'amber', keyPlaceholder: '可选，默认 ollama' },
   local_lmstudio: { label: '本地模型 · LM Studio', baseUrl: 'http://localhost:1234/v1', model: '', keyUrl: 'https://lmstudio.ai/', color: 'amber', keyPlaceholder: '可选' },
   local_custom: { label: '本地模型 · 自定义', baseUrl: '', model: '', keyUrl: '', color: 'amber', keyPlaceholder: '可选' },
 }
@@ -81,11 +81,15 @@ const ConfigView: React.FC = () => {
   const [localModels, setLocalModels] = useState<string[]>([])
   const [localModelsLoading, setLocalModelsLoading] = useState(false)
   const [localModelsError, setLocalModelsError] = useState('')
+  const [localModelManual, setLocalModelManual] = useState(false)
+  const [localModelNeedsSave, setLocalModelNeedsSave] = useState(false)
+  const [configLoaded, setConfigLoaded] = useState(false)
 
   const handleProviderChange = (newProvider: string) => {
     setProvider(newProvider)
     setLocalModels([])
     setLocalModelsError('')
+    setLocalModelManual(false)
     if (newProvider !== 'deepseek' && newProvider !== 'openai') {
       const preset = PROVIDER_PRESETS[newProvider]
       if (preset) {
@@ -95,7 +99,7 @@ const ConfigView: React.FC = () => {
     }
   }
 
-  const refreshLocalModels = async () => {
+  const refreshLocalModels = useCallback(async () => {
     if (!isLocalPreset(provider)) return
     setLocalModelsLoading(true)
     setLocalModelsError('')
@@ -107,7 +111,22 @@ const ConfigView: React.FC = () => {
         api_key: openaiKey || undefined,
       })
       if (result.ok && result.models) {
-        setLocalModels(result.models)
+        const models = result.models.filter((m) => String(m).trim())
+        setLocalModels(models)
+        if (models.length > 0) {
+          setOpenaiModel((current) => {
+            const trimmed = current.trim()
+            if (!trimmed || !models.includes(trimmed)) {
+              setLocalModelNeedsSave(true)
+              return models[0]
+            }
+            return current
+          })
+        } else {
+          setOpenaiModel('')
+          setLocalModelNeedsSave(true)
+          setLocalModelsError('未检测到已安装的模型，请先运行 ollama pull <模型名> 后再刷新')
+        }
       } else {
         setLocalModels([])
         setLocalModelsError(result.error || '拉取模型列表失败，请确认本地服务已启动')
@@ -118,7 +137,47 @@ const ConfigView: React.FC = () => {
     } finally {
       setLocalModelsLoading(false)
     }
-  }
+  }, [provider, openaiBase, openaiKey])
+
+  useEffect(() => {
+    if (!configLoaded || !isLocalPreset(provider) || !openaiBase.trim()) return
+    void refreshLocalModels()
+  }, [configLoaded, provider, refreshLocalModels])
+
+  // 列表更新后，强制去掉不在 Ollama 已安装列表中的旧配置模型
+  useEffect(() => {
+    if (!isLocalPreset(provider) || localModels.length === 0) return
+    setOpenaiModel((current) => {
+      if (localModels.includes(current)) return current
+      setLocalModelNeedsSave(true)
+      return localModels[0]
+    })
+  }, [localModels, provider])
+
+  const localModelSelectOptions = useMemo(() => {
+    if (localModelsLoading) {
+      return [{ value: '__loading__', label: '正在加载模型列表…' }]
+    }
+    if (localModels.length === 0) {
+      return [{ value: '', label: '暂无已安装模型，请先 pull 或点击刷新' }]
+    }
+    const seen = new Set<string>()
+    const opts: { value: string; label: string }[] = []
+    for (const m of localModels) {
+      if (!seen.has(m)) {
+        seen.add(m)
+        opts.push({ value: m, label: m })
+      }
+    }
+    return opts
+  }, [localModels, localModelsLoading])
+
+  const localModelSelectValue = useMemo(() => {
+    if (localModelsLoading) return '__loading__'
+    if (localModels.length === 0) return ''
+    if (localModels.includes(openaiModel)) return openaiModel
+    return localModels[0]
+  }, [localModels, openaiModel, localModelsLoading])
 
   useEffect(() => {
     const loadConfig = async () => {
@@ -153,6 +212,8 @@ const ConfigView: React.FC = () => {
         setAutoLaunch(isAutoLaunch)
       } catch (err) {
         console.error('Failed to load config:', err)
+      } finally {
+        setConfigLoaded(true)
       }
     }
     loadConfig()
@@ -193,7 +254,7 @@ const ConfigView: React.FC = () => {
 
       const result = await window.api.saveConfig(config)
       if (result.success) {
-        // Optional: Show success message or path
+        setLocalModelNeedsSave(false)
         console.log('Config saved to:', result.path)
         navigate('/chat')
       } else {
@@ -417,24 +478,56 @@ const ConfigView: React.FC = () => {
                 {localModelsError && (
                   <p className="text-xs text-red-400">{localModelsError}</p>
                 )}
-                {localModels.length > 0 && (
-                  <FaSelect
-                    value={localModels.includes(openaiModel) ? openaiModel : ''}
-                    aria-label="本地模型"
-                    onChange={setOpenaiModel}
-                    options={[
-                      { value: '', label: '从列表选择…' },
-                      ...localModels.map((m) => ({ value: m, label: m })),
-                    ]}
-                  />
+                {localModelNeedsSave && openaiModel && (
+                  <p className="text-xs text-amber-400">
+                    模型已更新为「{openaiModel}」，请点击下方「保存配置」后对话才会生效。
+                  </p>
                 )}
-                <input
-                  type="text"
-                  value={openaiModel}
-                  onChange={(e) => setOpenaiModel(e.target.value)}
-                  className="fa-input"
-                  placeholder="手动输入模型名，例如 qwen2.5:7b"
-                />
+                {localModels.length > 0 && openaiModel && !localModels.includes(openaiModel) && !localModelNeedsSave && (
+                  <p className="text-xs text-amber-400">
+                    当前模型「{openaiModel}」未在本地安装，请从列表选择，或在终端运行 ollama pull {openaiModel}
+                  </p>
+                )}
+                {localModelManual ? (
+                  <>
+                    <input
+                      type="text"
+                      value={openaiModel}
+                      onChange={(e) => setOpenaiModel(e.target.value)}
+                      className="fa-input"
+                      placeholder="手动输入模型名，例如 qwen2.5:7b"
+                    />
+                    <button
+                      type="button"
+                      className="fa-link text-xs"
+                      onClick={() => setLocalModelManual(false)}
+                    >
+                      返回列表选择
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <FaSelect
+                      value={localModelSelectValue}
+                      aria-label="本地模型"
+                      disabled={localModelsLoading || localModels.length === 0}
+                      onChange={(v) => {
+                        if (v && v !== '__loading__' && localModels.includes(v)) {
+                          setOpenaiModel(v)
+                          setLocalModelNeedsSave(true)
+                        }
+                      }}
+                      options={localModelSelectOptions}
+                    />
+                    <button
+                      type="button"
+                      className="fa-link text-xs"
+                      onClick={() => setLocalModelManual(true)}
+                    >
+                      手动输入模型名
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           ) : provider === 'deepseek' ? (

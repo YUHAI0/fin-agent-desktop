@@ -464,7 +464,10 @@ declare interface Window {
     checkForUpdates: () => Promise<UpdateCheckResult>
     resizeUpdateToast: (height: number) => Promise<{ success: boolean; height?: number }>
     updateToastReady: () => void
-    resizeToast: (height: number) => Promise<{ success: boolean; height?: number }>
+    resizeToast: (
+      height: number,
+      variant?: 'news' | 'price_alert' | 'default'
+    ) => Promise<{ success: boolean; height?: number }>
     setToastChrome: (theme?: string) => Promise<{ success: boolean; background?: string }>
     getPendingToast: () => Promise<{
       _title: string

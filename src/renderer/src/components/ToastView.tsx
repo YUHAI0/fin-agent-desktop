@@ -114,6 +114,11 @@ export default function ToastView(): JSX.Element {
     }
   }, [])
 
+  const isNews = payload?.type === 'news' || !!payload?.news_id || !!payload?.merged
+  const isPriceAlert = payload?.type === 'price_alert'
+  const isAppUpdate = payload?.type === 'app_update'
+  const tagLabel = isPriceAlert ? '价格提醒' : isAppUpdate ? '更新' : isNews ? '新闻' : ''
+
   // 按内容高度自适应窗口，避免固定高度留白
   useLayoutEffect(() => {
     if (!payload || !visible) return
@@ -132,7 +137,8 @@ export default function ToastView(): JSX.Element {
         }
       }
       if (h > 0) {
-        void window.api.resizeToast?.(h).finally(confirmShown)
+        const variant = isPriceAlert ? 'price_alert' : isNews ? 'news' : 'default'
+        void window.api.resizeToast?.(h, variant).finally(confirmShown)
       } else {
         // 高度尚未量到也先确认内容已渲染，避免主进程空窗超时关闭
         confirmShown()
@@ -142,7 +148,7 @@ export default function ToastView(): JSX.Element {
     apply()
     const raf = requestAnimationFrame(apply)
     return () => cancelAnimationFrame(raf)
-  }, [payload, visible])
+  }, [payload, visible, isPriceAlert, isNews])
 
   const handleClick = () => {
     setVisible(false)
@@ -164,17 +170,13 @@ export default function ToastView(): JSX.Element {
     window.api.toastClose?.()
   }
 
-  const isNews = payload?.type === 'news' || !!payload?.news_id || !!payload?.merged
-  const isPriceAlert = payload?.type === 'price_alert'
-  const isAppUpdate = payload?.type === 'app_update'
-  const tagLabel = isPriceAlert ? '价格提醒' : isAppUpdate ? '更新' : isNews ? '新闻' : ''
-
   return (
     <div
       ref={rootRef}
       className="fa-toast-root"
       data-visible={visible}
       data-news={isNews ? 'true' : undefined}
+      data-price-alert={isPriceAlert ? 'true' : undefined}
       onClick={handleClick}
       style={{ cursor: 'pointer' }}
     >

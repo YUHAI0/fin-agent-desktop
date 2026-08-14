@@ -26,6 +26,19 @@ def _maybe_append_local_hint(msg: str) -> str:
     return f"{msg}\n\n{_LOCAL_LLM_HINT}"
 
 
+def _format_llm_error(exc: Exception) -> str:
+    text = str(exc)
+    lowered = text.casefold()
+    if "not found" in lowered and "model" in lowered:
+        model = Config.OPENAI_MODEL or "未知"
+        return (
+            f"本地模型「{model}」不可用（Ollama 未安装该模型）。\n"
+            "请到设置页点击「刷新模型列表」，从下拉选择已安装的模型；\n"
+            f"或在终端运行：ollama pull {model}"
+        )
+    return f"Error: {text}"
+
+
 class FinAgent:
     def __init__(self):
         self.llm = LLMFactory.create_llm()
@@ -389,7 +402,9 @@ class FinAgent:
 
                 except Exception as e:
                     import traceback
-                    err_msg = _maybe_append_local_hint(f"Error: {str(e)}")
+                    err_msg = _format_llm_error(e)
+                    if Config.LLM_PROVIDER == "local" and "未安装该模型" not in err_msg:
+                        err_msg = _maybe_append_local_hint(err_msg)
                     # print(f"DEBUG: Exception in stream_chat: {traceback.format_exc()}", file=sys.stderr)
                     yield {"type": "error", "content": err_msg}
                     return

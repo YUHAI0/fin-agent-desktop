@@ -59,6 +59,8 @@ const TOAST_NEWS_WIDTH = 440
 const TOAST_NEWS_INITIAL_HEIGHT = 120
 const TOAST_NEWS_MIN_HEIGHT = 88
 const TOAST_NEWS_MAX_HEIGHT = 312
+/** 股价提醒文案较长，允许多行自适应高度 */
+const TOAST_PRICE_ALERT_MAX_HEIGHT = 220
 const TOAST_MARGIN = 16
 const TOAST_DURATION_MS = 30000
 const TOAST_MAX_STACK = 5
@@ -2154,14 +2156,19 @@ app.whenReady().then(() => {
     updateToastReveal?.()
   })
 
-  ipcMain.handle('resize-toast', (event, height: number) => {
+  ipcMain.handle('resize-toast', (event, height: number, variant?: string) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (!win || win.isDestroyed()) return { success: false }
     const entry = toastStack.find((t) => t.win === win)
     if (!entry) return { success: false }
     const isNews = entry.width >= TOAST_NEWS_WIDTH - 1
+    const isPriceAlert = variant === 'price_alert'
     const minH = isNews ? TOAST_NEWS_MIN_HEIGHT : 72
-    const maxH = isNews ? TOAST_NEWS_MAX_HEIGHT : TOAST_HEIGHT + 24
+    const maxH = isNews
+      ? TOAST_NEWS_MAX_HEIGHT
+      : isPriceAlert
+        ? TOAST_PRICE_ALERT_MAX_HEIGHT
+        : TOAST_HEIGHT + 24
     const h = Math.max(minH, Math.min(maxH, Math.round(Number(height) || minH)))
     if (Math.abs((entry.height || 0) - h) <= 1) {
       return { success: true, height: entry.height }

@@ -1255,6 +1255,20 @@ body {
     margin-top: 1px;
   }
 
+  .fa-toast-root[data-price-alert='true'] .fa-toast-title {
+    white-space: normal;
+    line-height: 1.35;
+  }
+
+  .fa-toast-root[data-price-alert='true'] .fa-toast-body {
+    white-space: normal;
+    line-height: 1.45;
+    word-break: break-word;
+    overflow: visible;
+    text-overflow: unset;
+    margin-top: 4px;
+  }
+
   .fa-toast-root[data-news='true'] .fa-toast-body {
     white-space: pre-line;
     display: -webkit-box;
