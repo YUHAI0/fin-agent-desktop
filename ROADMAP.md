@@ -107,6 +107,34 @@ Fin-Agent Desktop 1.0.1 已发布，详见 `docs/RELEASE-NOTES-1.0.1.md`。
 
 ---
 
+## v1.0.2 — 提醒文案与全量新闻查询 [计划中]
+
+> 目标：延续 v1.0.1 打磨思路，增强提醒可读性与 Agent 按需查新闻能力。  
+> 原则：不引入新页面模块；独立模块清晰边界；`query_notified_news`（本地已推送）与 `query_news`（实时拉取）职责分离。
+
+### 提醒系统
+
+- [ ] 股价提醒触发文案语义化（突破 / 回落 / 涨跌幅达阈值等），**全渠道**统一且**带股票名称**
+- [ ] 覆盖 Toast、提醒列表、触发历史、邮件、Agent 工具返回
+- [ ] 百分比提醒持久化元数据（`base_price`、`pct`、`direction`），文案可表达「较设置时上涨 X%」
+- [ ] 新增 `alert_copy.py` 集中生成文案；`alert_history` 增加 `message` 字段
+
+### 新闻与 Agent 工具
+
+- [ ] 新增 Agent 工具 `query_news`：按需从 akshare 实时拉取全量快讯
+- [ ] 筛选维度：内容关键词、板块（关键词 + 成分股关联）、指定股票、时间、数量
+- [ ] 板块成分股关联：akshare 概念/行业板块成分（`stock_board_concept_cons_em` 等）
+- [ ] 时间筛选：相对时间（`days` / `hours`）与绝对日期（`start_date` / `end_date`），同时传时以绝对日期为准
+- [ ] 新增 `news_query.py` 查询服务；现有 `query_notified_news` 保持不变
+
+### 明确不进 v1.0.2
+
+- 新闻结果写入本地库 / 资讯流 UI 展示 → 后续版本
+- 板块关联走 Tushare `get_concept_detail` 替代方案 → 暂用 akshare 东财板块
+- 投资仪表盘、Watchlist、定时简报 → **v1.1 / v1.2**
+
+---
+
 ## v1.1 — 顾问核心能力 [计划中]
 
 > 目标：从「金融数据对话助手」升级为「个人智能投资顾问」，奠定顾问身份。
@@ -292,4 +320,4 @@ Fin-Agent Desktop 1.0.1 已发布，详见 `docs/RELEASE-NOTES-1.0.1.md`。
 欢迎通过 GitHub Issues 提交 Feature Request 或 Pull Request。
 
 ---
-*Last Updated: 2026-08-13*
+*Last Updated: 2026-08-14*
