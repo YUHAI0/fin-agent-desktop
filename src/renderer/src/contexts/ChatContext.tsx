@@ -48,6 +48,7 @@ interface ChatContextType {
   requestPrefill: (text: string) => Promise<void>
   setSessionStreaming: (sessionId: string, streaming: boolean) => void
   isActiveSessionStreaming: () => boolean
+  isSessionStreaming: (sessionId: string) => boolean
 }
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined)
@@ -106,6 +107,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   activeSessionIdRef.current = activeSessionId
   const ensureSessionPromiseRef = useRef<Promise<string> | null>(null)
   const streamingBySessionRef = useRef<Record<string, boolean>>({})
+  const [streamingBySession, setStreamingBySession] = useState<Record<string, boolean>>({})
 
   const isDraftSession = ready && !activeSessionId
 
@@ -185,6 +187,17 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const setSessionStreaming = useCallback((sessionId: string, streaming: boolean) => {
     if (!sessionId) return
     streamingBySessionRef.current[sessionId] = streaming
+    setStreamingBySession((prev) => {
+      const current = Boolean(prev[sessionId])
+      if (current === streaming) return prev
+      if (!streaming) {
+        if (!(sessionId in prev)) return prev
+        const next = { ...prev }
+        delete next[sessionId]
+        return next
+      }
+      return { ...prev, [sessionId]: true }
+    })
   }, [])
 
   const isActiveSessionStreaming = useCallback(() => {
@@ -192,6 +205,11 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!id) return false
     return Boolean(streamingBySessionRef.current[id])
   }, [])
+
+  const isSessionStreaming = useCallback(
+    (sessionId: string) => Boolean(streamingBySession[sessionId]),
+    [streamingBySession]
+  )
 
   // ChatView 卸载后仍需清流式标记，否则离开 /chat 会卡住 requestPrefill 的 newSession 判断
   useEffect(() => {
@@ -366,7 +384,8 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         refreshTabs,
         requestPrefill,
         setSessionStreaming,
-        isActiveSessionStreaming
+        isActiveSessionStreaming,
+        isSessionStreaming
       }}
     >
       {children}

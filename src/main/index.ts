@@ -1162,6 +1162,8 @@ interface UpdateInfo {
 let pendingUpdate: UpdateInfo | null = null
 let updateDownloadPath = ''
 let updateDownloading = false
+/** 安装更新时跳过 before-quit 的生成中确认 */
+let installingUpdate = false
 /** 当前下载请求，关闭窗口时用于中断 */
 let activeUpdateRequest: http.ClientRequest | null = null
 let updateDownloadAborted = false
@@ -1184,7 +1186,8 @@ function abortActiveUpdateDownload(): void {
       // ignore
     }
   }
-  if (updateDownloadPath) {
+  // 仅中断进行中的下载时删除临时文件；下载完成后保留安装包供「立即安装」使用
+  if (updateDownloading && updateDownloadPath) {
     try {
       unlink(updateDownloadPath, () => {})
     } catch {
@@ -2299,20 +2302,60 @@ app.whenReady().then(() => {
     }
   })
 
-  ipcMain.handle('install-update', () => {
-    if (!updateDownloadPath) return { error: '安装包不存在' }
+  ipcMain.handle('install-update', async () => {
+    if (!updateDownloadPath) {
+      return { error: '安装包不存在，请重新下载' }
+    }
+    if (!existsSync(updateDownloadPath)) {
+      updateDownloadPath = ''
+      return { error: '安装包已失效，请重新下载' }
+    }
+    installingUpdate = true
     killPythonProcess()
-    setTimeout(() => {
+    const installerPath = updateDownloadPath
+    try {
       if (process.platform === 'darwin') {
-        shell.openPath(updateDownloadPath)
-        app.quit()
+        const err = await shell.openPath(installerPath)
+        if (err) throw new Error(err)
+      } else if (process.platform === 'win32') {
+        const err = await shell.openPath(installerPath)
+        if (err) {
+          await new Promise<void>((resolve, reject) => {
+            try {
+              const sub = spawn(installerPath, [], {
+                detached: true,
+                stdio: 'ignore',
+                windowsHide: false
+              })
+              sub.on('error', reject)
+              sub.unref()
+              resolve()
+            } catch (spawnErr) {
+              reject(spawnErr)
+            }
+          })
+        }
       } else {
-        const sub = spawn(updateDownloadPath, [], { detached: true, stdio: 'ignore' })
-        sub.unref()
-        app.quit()
+        await new Promise<void>((resolve, reject) => {
+          try {
+            const sub = spawn(installerPath, [], { detached: true, stdio: 'ignore' })
+            sub.on('error', reject)
+            sub.unref()
+            resolve()
+          } catch (spawnErr) {
+            reject(spawnErr)
+          }
+        })
       }
-    }, 500)
-    return { success: true }
+      console.log('[Update] installer launched:', installerPath)
+      setTimeout(() => app.exit(0), 400)
+      return { success: true }
+    } catch (err: any) {
+      installingUpdate = false
+      const msg = String(err?.message ?? err)
+      console.error('[Update] install failed:', msg)
+      return { error: `无法启动安装程序：${msg}` }
+    }
   })
 
   ipcMain.handle('set-title-bar-theme', (_e, theme: 'dark' | 'light') => {
@@ -2657,6 +2700,11 @@ app.on('window-all-closed', () => {
 let quitConfirmResolve: ((confirmed: boolean) => void) | null = null
 
 app.on('before-quit', async (event) => {
+  // 安装更新时直接退出，不弹「正在生成」确认框
+  if (installingUpdate) {
+    killPythonProcess()
+    return
+  }
   // 检查是否有正在进行的生成
   if (hasActiveGeneration()) {
     // 再次检查，确保请求真的还在进行（防止竞态条件）

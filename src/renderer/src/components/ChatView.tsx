@@ -184,6 +184,18 @@ const markdownComponents = {
 
 const SIDEBAR_STORAGE_KEY = 'fin-agent-sidebar'
 
+/** 当前会话是否已开始输出（思考/正文/工具），用于决定是否显示等待三点 */
+function assistantHasStarted(msgs: Message[]): boolean {
+  const last = msgs[msgs.length - 1]
+  if (!last || last.role !== 'assistant') return false
+  if (last.content?.trim()) return true
+  return (last.blocks || []).some((block) => {
+    if (block.type === 'tool_execution') return true
+    if (block.type === 'text' || block.type === 'thinking') return Boolean(block.content)
+    return false
+  })
+}
+
 function readSidebarPrefs(): { width: number; collapsed: boolean } {
   try {
     const raw = localStorage.getItem(SIDEBAR_STORAGE_KEY)
@@ -215,7 +227,6 @@ const ChatView: React.FC = () => {
   const { theme, setTheme } = useTheme()
   const [input, setInput] = useState('')
   const [drawerOpen, setDrawerOpen] = useState(false)
-  const [isTyping, setIsTyping] = useState(false)
   const [respondingSessions, setRespondingSessions] = useState<Set<string>>(() => new Set())
   const [version, setVersion] = useState('...')
   const [autoScroll, setAutoScroll] = useState(true)
@@ -306,6 +317,8 @@ const ChatView: React.FC = () => {
   const displayMessages = useMemo(() => normalizeSessionMessages(messages), [messages])
 
   const showWelcomeHero = displayMessages.length === 0
+  // 等待三点只跟当前标签绑定：别的会话在生成时，切过来不应看到对方的等待标志
+  const isTyping = isResponding && !assistantHasStarted(displayMessages)
 
   const quickReplyOptions = useMemo(() => {
     if (isResponding || isTyping) return []
@@ -367,9 +380,6 @@ const ChatView: React.FC = () => {
       updater: (prev: Message[]) => Message[]
     ) => applyToSessionRef.current(sessionId, updater)
 
-    const isActiveSession = (sessionId?: string) =>
-      !sessionId || sessionId === activeSessionIdRef.current
-
     const removeListener = window.api.onNewMessage((payload) => {
       const text = typeof payload === 'string' ? payload : payload?.text
       const sessionId = typeof payload === 'string' ? undefined : payload?.sessionId
@@ -379,9 +389,6 @@ const ChatView: React.FC = () => {
       const routeMessage = (sid?: string) => {
         applyToSession(sid, (prev) => [...prev, { role: 'user', content: text, blocks: [] }])
         markResponding(sid, true)
-        if (isActiveSession(sid)) {
-          setIsTyping(true)
-        }
       }
 
       // 快捷输入等路径可能不带 sessionId；草稿态先建会话再入消息，避免空标签缺失
@@ -416,17 +423,6 @@ const ChatView: React.FC = () => {
           data.type === 'tool_call_chunk'
         ) {
           markResponding(eventSessionId, true)
-        }
-
-        // 仅活动会话更新输入区 typing 指示
-        if (isActiveSession(eventSessionId)) {
-          if (data.type === 'content' || data.type === 'answer') {
-              console.log('[ChatView] Received content/answer, hiding typing indicator')
-              setIsTyping(false)
-          } else if (data.type === 'error' || data.type === 'finish') {
-              console.log('[ChatView] Received error/finish, hiding typing indicator')
-              setIsTyping(false)
-          }
         }
 
         if (data.type === 'error' || data.type === 'finish') {
@@ -859,7 +855,6 @@ const ChatView: React.FC = () => {
       console.log('[ChatView] Stopping generation...')
       window.api.stopGeneration(activeSessionId ?? undefined)
       markResponding(activeSessionId ?? undefined, false)
-      setIsTyping(false)
       return
     }
 

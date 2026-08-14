@@ -189,9 +189,21 @@ export default function UpdateToastView(): JSX.Element {
     }
   }, [syncWindowSize])
 
+  const [installing, setInstalling] = useState(false)
+
   const handleInstall = useCallback(async () => {
-    await window.api.installUpdate()
-  }, [])
+    setInstalling(true)
+    try {
+      const res = await window.api.installUpdate()
+      if (res?.error) {
+        setErrorMsg(res.error)
+        setStage('error')
+        syncWindowSize('error')
+      }
+    } finally {
+      setInstalling(false)
+    }
+  }, [syncWindowSize])
 
   const showNotes = stage === 'available' && Boolean(info?.releaseNotes)
 
@@ -285,8 +297,13 @@ export default function UpdateToastView(): JSX.Element {
           </>
         )}
         {stage === 'done' && (
-          <button type="button" className="fa-update-toast-btn fa-update-toast-btn--primary" onClick={handleInstall}>
-            立即安装
+          <button
+            type="button"
+            className="fa-update-toast-btn fa-update-toast-btn--primary"
+            onClick={handleInstall}
+            disabled={installing}
+          >
+            {installing ? '正在启动安装…' : '立即安装'}
           </button>
         )}
         {stage === 'error' && (

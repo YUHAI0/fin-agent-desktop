@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { Archive, History, MessageSquarePlus, PanelLeftClose } from 'lucide-react'
+import { Archive, History, Loader2, MessageSquarePlus, PanelLeftClose } from 'lucide-react'
 import { useChat } from '../contexts/ChatContext'
 
 export const SIDEBAR_DEFAULT_WIDTH = 260
@@ -25,7 +25,7 @@ const SessionTabs: React.FC<SessionTabsProps> = ({
   onWidthChange,
   onCollapse
 }) => {
-  const { openTabs, activeSessionId, openSession, archiveTab, newSession, isDraftSession } =
+  const { openTabs, activeSessionId, openSession, archiveTab, newSession, isDraftSession, isSessionStreaming } =
     useChat()
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null)
   const [dragging, setDragging] = useState(false)
@@ -153,6 +153,7 @@ const SessionTabs: React.FC<SessionTabsProps> = ({
           )}
           {openTabs.map((tab) => {
             const active = tab.id === activeSessionId
+            const streaming = isSessionStreaming(tab.id)
             return (
               <div
                 key={tab.id}
@@ -168,8 +169,18 @@ const SessionTabs: React.FC<SessionTabsProps> = ({
                 className={['group fa-sidebar-tab', active ? 'fa-sidebar-tab-active' : ''].join(
                   ' '
                 )}
+                aria-busy={streaming || undefined}
               >
                 <span className="min-w-0 flex-1 truncate">{tab.title}</span>
+                {streaming && (
+                  <Loader2
+                    size={14}
+                    strokeWidth={2}
+                    className="fa-sidebar-tab-spinner shrink-0"
+                    aria-hidden
+                    title="正在回复"
+                  />
+                )}
                 <button
                   type="button"
                   onClick={(e) => {
