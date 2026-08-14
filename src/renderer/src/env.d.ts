@@ -19,9 +19,16 @@ interface ProfileCompleteness {
   missing: string[]
 }
 
+interface LocalModelsResult {
+  ok: boolean
+  models?: string[]
+  error?: string
+}
+
 interface ConfigData {
     tushare_token: string
     provider: string
+    local_backend?: string
     deepseek_key?: string
     deepseek_base?: string
     deepseek_model?: string
@@ -346,6 +353,7 @@ declare interface Window {
     checkConfig: () => Promise<{ configured: boolean; message?: string }>
     getConfig: () => Promise<ConfigData>
     saveConfig: (data: ConfigData) => Promise<{ success: boolean; error?: string; path?: string }>
+    listLocalModels: (payload: { backend?: string; base_url?: string; api_key?: string }) => Promise<LocalModelsResult>
     getProfile: () => Promise<{ profile: UserProfile; completeness: ProfileCompleteness }>
     saveProfile: (data: object) => Promise<{
       success: boolean

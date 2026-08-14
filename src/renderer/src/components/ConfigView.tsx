@@ -11,6 +11,36 @@ const PROVIDER_PRESETS: Record<string, { label: string; baseUrl: string; model: 
   qwen: { label: 'Qwen (通义千问)', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus', keyUrl: 'https://dashscope.console.aliyun.com/apiKey', color: 'orange', keyPlaceholder: 'sk-...' },
   siliconflow: { label: 'SiliconFlow (硅基流动)', baseUrl: 'https://api.siliconflow.cn/v1', model: 'deepseek-ai/DeepSeek-V3', keyUrl: 'https://cloud.siliconflow.cn/account/ak', color: 'cyan', keyPlaceholder: 'sk-...' },
   openai: { label: 'OpenAI / 自定义', baseUrl: '', model: '', keyUrl: '', color: 'gray', keyPlaceholder: 'sk-...' },
+  local_ollama: { label: '本地模型 · Ollama', baseUrl: 'http://localhost:11434/v1', model: 'qwen2.5:7b', keyUrl: 'https://ollama.com/download', color: 'amber', keyPlaceholder: '可选，默认 ollama' },
+  local_lmstudio: { label: '本地模型 · LM Studio', baseUrl: 'http://localhost:1234/v1', model: '', keyUrl: 'https://lmstudio.ai/', color: 'amber', keyPlaceholder: '可选' },
+  local_custom: { label: '本地模型 · 自定义', baseUrl: '', model: '', keyUrl: '', color: 'amber', keyPlaceholder: '可选' },
+}
+
+function isLocalPreset(p: string): boolean {
+  return p.startsWith('local_')
+}
+
+function localBackendFromPreset(p: string): 'ollama' | 'lmstudio' | 'custom' {
+  if (p === 'local_ollama') return 'ollama'
+  if (p === 'local_lmstudio') return 'lmstudio'
+  return 'custom'
+}
+
+function presetFromLocalBackend(backend: string, baseUrl?: string): string {
+  if (backend === 'ollama') return 'local_ollama'
+  if (backend === 'lmstudio') return 'local_lmstudio'
+  if (backend === 'custom') return 'local_custom'
+  const url = baseUrl || ''
+  if (url.includes('11434')) return 'local_ollama'
+  if (url.includes('1234')) return 'local_lmstudio'
+  return 'local_custom'
+}
+
+function defaultLocalApiKey(backend: 'ollama' | 'lmstudio' | 'custom', key: string): string {
+  if (key.trim()) return key
+  if (backend === 'ollama') return 'ollama'
+  if (backend === 'lmstudio') return 'lm-studio'
+  return ''
 }
 
 const NEWS_POLL_INTERVAL_OPTIONS = [5, 10, 15, 30] as const
@@ -48,15 +78,45 @@ const ConfigView: React.FC = () => {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [shortcutStatus, setShortcutStatus] = useState<{valid: boolean, message: string} | null>(null)
+  const [localModels, setLocalModels] = useState<string[]>([])
+  const [localModelsLoading, setLocalModelsLoading] = useState(false)
+  const [localModelsError, setLocalModelsError] = useState('')
 
   const handleProviderChange = (newProvider: string) => {
     setProvider(newProvider)
+    setLocalModels([])
+    setLocalModelsError('')
     if (newProvider !== 'deepseek' && newProvider !== 'openai') {
       const preset = PROVIDER_PRESETS[newProvider]
       if (preset) {
         setOpenaiBase(preset.baseUrl)
         setOpenaiModel(preset.model)
       }
+    }
+  }
+
+  const refreshLocalModels = async () => {
+    if (!isLocalPreset(provider)) return
+    setLocalModelsLoading(true)
+    setLocalModelsError('')
+    try {
+      const backend = localBackendFromPreset(provider)
+      const result = await window.api.listLocalModels({
+        backend,
+        base_url: openaiBase,
+        api_key: openaiKey || undefined,
+      })
+      if (result.ok && result.models) {
+        setLocalModels(result.models)
+      } else {
+        setLocalModels([])
+        setLocalModelsError(result.error || '拉取模型列表失败，请确认本地服务已启动')
+      }
+    } catch (err: unknown) {
+      setLocalModels([])
+      setLocalModelsError(err instanceof Error ? err.message : '拉取模型列表失败')
+    } finally {
+      setLocalModelsLoading(false)
     }
   }
 
@@ -67,7 +127,11 @@ const ConfigView: React.FC = () => {
         if (config) {
           setDataSource(config.data_source || 'akshare')
           setTushareToken(config.tushare_token || '')
-          setProvider(config.provider || 'deepseek')
+          if (config.provider === 'local') {
+            setProvider(presetFromLocalBackend(config.local_backend || '', config.openai_base))
+          } else {
+            setProvider(config.provider || 'deepseek')
+          }
           setDeepseekKey(config.deepseek_key || '')
           setDeepseekBase(config.deepseek_base || 'https://api.deepseek.com')
           setDeepseekModel(config.deepseek_model || 'deepseek-chat')
@@ -100,14 +164,19 @@ const ConfigView: React.FC = () => {
     setError('')
 
     try {
+      const isLocal = isLocalPreset(provider)
+      const localBackend = isLocal ? localBackendFromPreset(provider) : undefined
       const config = {
         data_source: dataSource,
         tushare_token: tushareToken,
-        provider,
+        provider: isLocal ? 'local' : provider,
+        local_backend: localBackend,
         deepseek_key: deepseekKey,
         deepseek_base: deepseekBase,
         deepseek_model: deepseekModel,
-        openai_key: openaiKey,
+        openai_key: isLocal && localBackend
+          ? defaultLocalApiKey(localBackend, openaiKey)
+          : openaiKey,
         openai_base: openaiBase,
         openai_model: openaiModel,
         wake_up_shortcut: wakeUpShortcut,
@@ -295,7 +364,80 @@ const ConfigView: React.FC = () => {
             />
           </div>
 
-          {provider === 'deepseek' ? (
+          {isLocalPreset(provider) ? (
+            <div className="space-y-4 border-l-2 border-amber-500 pl-4">
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-[var(--fa-text)]">
+                Fin-Agent 依赖工具调用（查行情、设提醒等）。建议使用支持 function calling 的模型，如 Qwen2.5、Llama 3.1+。过小模型可能导致工具调用失败。
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <label className="fa-label">API Key（可选）</label>
+                  {PROVIDER_PRESETS[provider]?.keyUrl && (
+                    <button
+                      type="button"
+                      onClick={() => window.api.openExternal(PROVIDER_PRESETS[provider].keyUrl)}
+                      className="fa-link"
+                      title="前往下载或文档"
+                    >
+                      <ExternalLink size={14} />
+                      <span>{provider === 'local_ollama' ? '下载 Ollama' : provider === 'local_lmstudio' ? '下载 LM Studio' : '帮助'}</span>
+                    </button>
+                  )}
+                </div>
+                <input
+                  type="password"
+                  value={openaiKey}
+                  onChange={(e) => setOpenaiKey(e.target.value)}
+                  className="fa-input"
+                  placeholder={PROVIDER_PRESETS[provider]?.keyPlaceholder || '可选'}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="fa-label">基础 URL</label>
+                <input
+                  type="text"
+                  value={openaiBase}
+                  onChange={(e) => setOpenaiBase(e.target.value)}
+                  className="fa-input"
+                  placeholder="例如：http://localhost:11434/v1"
+                />
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="fa-label">模型</label>
+                  <button
+                    type="button"
+                    onClick={refreshLocalModels}
+                    disabled={localModelsLoading}
+                    className="fa-btn-ghost shrink-0 px-3 py-1 text-xs"
+                  >
+                    {localModelsLoading ? '刷新中...' : '刷新模型列表'}
+                  </button>
+                </div>
+                {localModelsError && (
+                  <p className="text-xs text-red-400">{localModelsError}</p>
+                )}
+                {localModels.length > 0 && (
+                  <FaSelect
+                    value={localModels.includes(openaiModel) ? openaiModel : ''}
+                    aria-label="本地模型"
+                    onChange={setOpenaiModel}
+                    options={[
+                      { value: '', label: '从列表选择…' },
+                      ...localModels.map((m) => ({ value: m, label: m })),
+                    ]}
+                  />
+                )}
+                <input
+                  type="text"
+                  value={openaiModel}
+                  onChange={(e) => setOpenaiModel(e.target.value)}
+                  className="fa-input"
+                  placeholder="手动输入模型名，例如 qwen2.5:7b"
+                />
+              </div>
+            </div>
+          ) : provider === 'deepseek' ? (
             <div className="space-y-4 border-l-2 border-[var(--fa-accent)] pl-4">
               <div className="space-y-2">
                 <div className="flex items-center gap-2">

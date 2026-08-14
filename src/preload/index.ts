@@ -129,6 +129,8 @@ const api = {
   checkConfig: () => ipcRenderer.invoke('check-config'),
   getConfig: () => ipcRenderer.invoke('get-config'),
   saveConfig: (data: any) => ipcRenderer.invoke('save-config', data),
+  listLocalModels: (payload: { backend?: string; base_url?: string; api_key?: string }) =>
+    ipcRenderer.invoke('list-local-models', payload),
   getProfile: () => ipcRenderer.invoke('get-profile'),
   saveProfile: (data: object) => ipcRenderer.invoke('save-profile', data),
   openSettings: () => ipcRenderer.send('open-settings'),

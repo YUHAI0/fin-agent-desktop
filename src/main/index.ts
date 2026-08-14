@@ -1815,6 +1815,15 @@ app.whenReady().then(() => {
     return await makeApiRequest('/config')
   })
 
+  ipcMain.handle('list-local-models', async (_e, payload: { backend?: string; base_url?: string; api_key?: string }) => {
+    const params = new URLSearchParams()
+    if (payload?.backend) params.set('backend', payload.backend)
+    if (payload?.base_url) params.set('base_url', payload.base_url)
+    if (payload?.api_key) params.set('api_key', payload.api_key)
+    const qs = params.toString()
+    return makeApiRequest(`/config/local-models${qs ? `?${qs}` : ''}`)
+  })
+
   ipcMain.handle('get-profile', async () => {
     return await makeApiRequest('/profile')
   })
