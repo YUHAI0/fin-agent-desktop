@@ -7,6 +7,7 @@ from fin_agent.news import (
     SUPPORTED_NEWS_SOURCES,
 )
 from fin_agent.news_monitor import get_news_monitor, start_news_monitor
+from fin_agent.news_query import query_news_live
 from fin_agent.news_store import (
     SUBSCRIPTION_TYPES,
     NewsSubscriptionStore,
@@ -49,13 +50,13 @@ def _bool(value, field_name):
     raise ValueError(f"{field_name} 必须是布尔值")
 
 
-def _limit(value):
+def _limit(value, maximum=50):
     try:
         value = int(value)
     except (TypeError, ValueError):
         raise ValueError("limit 必须是整数")
-    if value < 1 or value > 200:
-        raise ValueError("limit 必须在 1 到 200 之间")
+    if value < 1 or value > maximum:
+        raise ValueError(f"limit 必须在 1 到 {maximum} 之间")
     return value
 
 
@@ -121,11 +122,46 @@ def query_notified_news(
             unread_only=unread_only,
             subscription_type=subscription_type,
             query=str(query).strip() if query else None,
-            limit=_limit(limit),
+            limit=_limit(limit, maximum=200),
         )
         return _result(result)
     except (TypeError, ValueError, OSError) as exc:
         return _error(f"查询新闻失败：{exc}")
+
+
+def query_news(
+    query=None,
+    keywords=None,
+    sector=None,
+    sector_mode="both",
+    ts_code=None,
+    sources=None,
+    days=None,
+    hours=None,
+    start_date=None,
+    end_date=None,
+    limit=20,
+):
+    """从 akshare 实时拉取全量快讯，支持个股、板块、关键词与时间筛选。"""
+    try:
+        data = query_news_live(
+            query=query,
+            keywords=keywords,
+            sector=sector,
+            sector_mode=sector_mode,
+            ts_code=ts_code,
+            sources=sources,
+            days=days,
+            hours=hours,
+            start_date=start_date,
+            end_date=end_date,
+            limit=_limit(limit),
+        )
+        return _result(data)
+    except (TypeError, ValueError, OSError) as exc:
+        return _error(
+            f"查询新闻失败：{exc}。可尝试 query_notified_news 查本地已推送新闻。"
+        )
 
 
 def create_news_subscription(
@@ -343,6 +379,70 @@ NEWS_TOOLS_SCHEMA = [
                         "type": "integer",
                         "minimum": 1,
                         "maximum": 200,
+                        "default": 20,
+                        "description": "最多返回的新闻条数。",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_news",
+            "description": (
+                "从 akshare 实时拉取全量快讯，支持个股、板块、关键词与时间筛选；"
+                "不查本地已推送记录。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "标题/摘要关键词搜索。",
+                    },
+                    "keywords": _KEYWORDS_PROPERTY,
+                    "sector": {
+                        "type": "string",
+                        "description": "板块名称，如「低空经济」。",
+                    },
+                    "sector_mode": {
+                        "type": "string",
+                        "enum": ["keyword", "constituents", "both"],
+                        "default": "both",
+                        "description": (
+                            "板块匹配模式：keyword（文本）、"
+                            "constituents（成分股）、both（两者）。"
+                        ),
+                    },
+                    "ts_code": {
+                        "type": "string",
+                        "description": "股票代码（如 300750.SZ），指定时拉取个股新闻。",
+                    },
+                    "sources": _SOURCES_PROPERTY,
+                    "days": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "最近 N 天；与 hours 互斥，start_date/end_date 优先。",
+                    },
+                    "hours": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "最近 N 小时；优先于 days。",
+                    },
+                    "start_date": {
+                        "type": "string",
+                        "description": "开始日期 YYYY-MM-DD。",
+                    },
+                    "end_date": {
+                        "type": "string",
+                        "description": "结束日期 YYYY-MM-DD。",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 50,
                         "default": 20,
                         "description": "最多返回的新闻条数。",
                     },

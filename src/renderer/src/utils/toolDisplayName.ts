@@ -39,6 +39,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   list_alerts: '查看价格提醒',
   remove_alert: '删除价格提醒',
   update_alert: '更新价格提醒',
+  query_news: '全量新闻查询',
   query_notified_news: '查询已推送新闻',
   create_news_subscription: '创建新闻订阅',
   list_news_subscriptions: '查看新闻订阅',

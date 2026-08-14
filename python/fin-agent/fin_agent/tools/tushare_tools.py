@@ -32,6 +32,7 @@ from fin_agent.tools.news_tools import (
     enable_news_subscription,
     list_news_subscriptions,
     pause_news_subscription,
+    query_news,
     query_notified_news,
     refresh_news,
     update_news_subscription,
@@ -40,6 +41,7 @@ from fin_agent.tools.market_tools import requires_tushare
 from fin_agent.tools import market_tools
 
 NEWS_TOOL_FUNCTIONS = {
+    "query_news": query_news,
     "query_notified_news": query_notified_news,
     "create_news_subscription": create_news_subscription,
     "list_news_subscriptions": list_news_subscriptions,
