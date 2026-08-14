@@ -12,6 +12,20 @@ from fin_agent.utils import FinMarkdown
 from rich.console import Console
 from rich.live import Live
 
+_LOCAL_LLM_HINT = (
+    "当前使用的是本地模型，可能不支持或未正确响应工具调用。"
+    "建议更换为 Qwen2.5 等支持 function calling 的模型，或在设置中改用 DeepSeek 等云端 API。"
+)
+
+
+def _maybe_append_local_hint(msg: str) -> str:
+    if Config.LLM_PROVIDER != "local":
+        return msg
+    if _LOCAL_LLM_HINT in msg:
+        return msg
+    return f"{msg}\n\n{_LOCAL_LLM_HINT}"
+
+
 class FinAgent:
     def __init__(self):
         self.llm = LLMFactory.create_llm()
@@ -375,7 +389,7 @@ class FinAgent:
 
                 except Exception as e:
                     import traceback
-                    err_msg = f"Error: {str(e)}"
+                    err_msg = _maybe_append_local_hint(f"Error: {str(e)}")
                     # print(f"DEBUG: Exception in stream_chat: {traceback.format_exc()}", file=sys.stderr)
                     yield {"type": "error", "content": err_msg}
                     return
@@ -408,7 +422,7 @@ class FinAgent:
                     try:
                         tool_result = execute_tool_call(function_name, arguments)
                     except Exception as e:
-                        tool_result = f"Error executing tool: {e}"
+                        tool_result = _maybe_append_local_hint(f"Error executing tool: {e}")
 
                     yield {
                         "type": "tool_result",
