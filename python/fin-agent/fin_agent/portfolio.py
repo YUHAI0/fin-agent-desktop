@@ -1,6 +1,7 @@
 import datetime
 import json
 import os
+import time
 import uuid
 from typing import Dict, List, Optional
 
@@ -333,29 +334,50 @@ class PortfolioManager:
             return "未知"
         return text
 
-    def _industry_map(self, ts_codes, timeout_sec=8.0):
-        """一次拉取股票基础信息，按 ts_code 映射行业；失败则空映射（调用方回落「未知」）。"""
+    def _industry_map(self, ts_codes, timeout_sec=12.0):
+        """按持仓代码逐票查行业（akshare 全市场列表无行业字段）；失败回落空映射。"""
+        from concurrent.futures import as_completed
         from fin_agent.datasources import get_provider
 
-        wanted = {str(code) for code in ts_codes if code}
+        wanted = [str(code) for code in ts_codes if code]
+        if not wanted:
+            return {}
 
-        def fetch():
-            df = get_provider().get_stock_basic()
-            if df is None or len(df) == 0 or "ts_code" not in df.columns:
-                return {}
-            codes = df["ts_code"].astype(str)
-            if wanted:
-                df = df[codes.isin(wanted)]
-                codes = df["ts_code"].astype(str)
-            industries = df["industry"] if "industry" in df.columns else [None] * len(df)
-            return dict(zip(codes, industries))
+        provider = get_provider()
 
-        with ThreadPoolExecutor(max_workers=1) as ex:
-            future = ex.submit(fetch)
+        def one(code):
             try:
-                return future.result(timeout=timeout_sec)
-            except (FuturesTimeoutError, Exception):
-                return {}
+                df = provider.get_stock_basic(ts_code=code)
+                if df is None or len(df) == 0:
+                    return code, None
+                industry = df.iloc[0].get("industry") if "industry" in df.columns else None
+                return code, industry
+            except Exception:
+                return code, None
+
+        result = {}
+        workers = min(4, len(wanted))
+        deadline = time.monotonic() + timeout_sec
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            future_map = {ex.submit(one, code): code for code in wanted}
+            try:
+                for fut in as_completed(future_map, timeout=timeout_sec):
+                    try:
+                        code, industry = fut.result()
+                        result[code] = industry
+                    except Exception:
+                        result[future_map[fut]] = None
+                    if time.monotonic() >= deadline:
+                        break
+            except FuturesTimeoutError:
+                for fut, code in future_map.items():
+                    if fut.done() and code not in result:
+                        try:
+                            c, industry = fut.result(timeout=0)
+                            result[c] = industry
+                        except Exception:
+                            result[code] = None
+        return result
 
     def _compute_breakdown(self, positions, total_market_value):
         if not positions or not total_market_value:

@@ -19,7 +19,66 @@ _QUOTE_HEADERS = {
     "Referer": "https://finance.sina.com.cn",
 }
 
+_EM_INFO_HEADERS = {
+    "User-Agent": "Mozilla/5.0",
+    "Referer": "https://quote.eastmoney.com/",
+}
+
+# plain code -> {"industry", "name", "list_date"}；进程内缓存，避免组合页反复打东财
+_EM_META_CACHE = {}
+
 _ADJ_MAP = {None: "", "": "", "qfq": "qfq", "hfq": "hfq"}
+
+
+def _em_secid(plain_code):
+    """东财 secid：沪市 1.xxxxxx，深/北 0.xxxxxx。"""
+    plain = str(plain_code).strip()
+    market = 1 if plain.startswith("6") else 0
+    return f"{market}.{plain}"
+
+
+def _fetch_em_stock_meta(plain_code, timeout=8.0):
+    """
+    东财个股基础信息（含行业）。优先走缓存。
+    返回 {"industry", "name", "list_date"}，字段可能为 None。
+    """
+    plain = str(plain_code).strip()
+    if plain in _EM_META_CACHE:
+        return _EM_META_CACHE[plain]
+
+    url = "https://push2.eastmoney.com/api/qt/stock/get"
+    params = {
+        "fltt": "2",
+        "invt": "2",
+        "fields": "f57,f58,f127,f189",
+        "secid": _em_secid(plain),
+    }
+
+    def _once():
+        resp = requests.get(url, params=params, headers=_EM_INFO_HEADERS, timeout=timeout)
+        resp.raise_for_status()
+        data = (resp.json() or {}).get("data") or {}
+        industry = data.get("f127")
+        name = data.get("f58")
+        list_raw = data.get("f189")
+        list_date = None
+        if list_raw not in (None, "", "-", "0", 0):
+            text = str(list_raw).replace("-", "").replace("/", "")
+            if len(text) >= 8 and text[:8].isdigit():
+                list_date = text[:8]
+        if isinstance(industry, str):
+            industry = industry.strip() or None
+        if isinstance(name, str):
+            name = name.strip() or None
+        return {"industry": industry, "name": name, "list_date": list_date}
+
+    try:
+        meta = _with_retry(_once, retries=2, delay=0.4)
+    except Exception:
+        meta = {"industry": None, "name": None, "list_date": None}
+
+    _EM_META_CACHE[plain] = meta
+    return meta
 
 
 def _with_retry(fn, retries=2, delay=0.4):
@@ -188,7 +247,7 @@ class AkshareProvider(MarketDataProvider):
 
     def get_stock_basic(self, ts_code=None, name=None):
         self.require(CAP_STOCK_BASIC)
-        # 按代码查询走单票行情拿名称，避免拉全市场列表
+        # 按代码查询：行情拿名称 + 东财补行业/上市日，避免拉全市场列表
         if ts_code and not name:
             full = to_ts_code(ts_code)
             plain = to_plain_code(full)
@@ -203,16 +262,17 @@ class AkshareProvider(MarketDataProvider):
                     rows = _fetch_quotes_tencent(wanted)
                 except Exception:
                     rows = []
-            if rows:
-                return pd.DataFrame([{
-                    "ts_code": full,
-                    "symbol": plain,
-                    "name": rows[0].get("name"),
-                    "area": None,
-                    "industry": None,
-                    "market": None,
-                    "list_date": None,
-                }])
+            meta = _fetch_em_stock_meta(plain)
+            stock_name = (rows[0].get("name") if rows else None) or meta.get("name")
+            return pd.DataFrame([{
+                "ts_code": full,
+                "symbol": plain,
+                "name": stock_name,
+                "area": None,
+                "industry": meta.get("industry"),
+                "market": None,
+                "list_date": meta.get("list_date"),
+            }])
 
         df = ak.stock_info_a_code_name()
         df = df.rename(columns={"code": "symbol", "name": "name"})
@@ -224,6 +284,16 @@ class AkshareProvider(MarketDataProvider):
             df = df[df["name"].str.contains(name, na=False)]
         for col in ("area", "industry", "market", "list_date"):
             df[col] = None
+        # 结果集较小时按代码补行业（组合/选股场景）；全市场列表不逐票请求
+        if len(df) > 0 and len(df) <= 50:
+            industries = []
+            list_dates = []
+            for _, row in df.iterrows():
+                meta = _fetch_em_stock_meta(row["symbol"])
+                industries.append(meta.get("industry"))
+                list_dates.append(meta.get("list_date"))
+            df["industry"] = industries
+            df["list_date"] = list_dates
         return df[["ts_code", "symbol", "name", "area", "industry", "market", "list_date"]]
 
     def get_daily_price(self, ts_code, start_date=None, end_date=None, adj=None):
