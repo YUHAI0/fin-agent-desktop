@@ -107,34 +107,36 @@ Fin-Agent Desktop 1.0.1 已发布，详见 `docs/RELEASE-NOTES-1.0.1.md`。
 
 ---
 
-## v1.0.2 — 提醒文案、全量新闻与本地模型 [计划中]
+## v1.0.2 — 提醒文案、全量新闻与本地模型 [已完成]
 
 > 目标：延续 v1.0.1 打磨思路，增强提醒可读性、Agent 按需查新闻能力，以及桌面版本地模型配置体验。  
 > 原则：不引入新页面模块；独立模块清晰边界；后端已有能力优先暴露到 UI。
 
+Fin-Agent Desktop 1.0.2 已发布，详见 `docs/RELEASE-NOTES-1.0.2.md`。
+
 ### 提醒系统
 
-- [ ] 股价提醒触发文案语义化（突破 / 回落 / 涨跌幅达阈值等），**全渠道**统一且**带股票名称**
-- [ ] 覆盖 Toast、提醒列表、触发历史、邮件、Agent 工具返回
-- [ ] 百分比提醒持久化元数据（`base_price`、`pct`、`direction`），文案可表达「较设置时上涨 X%」
-- [ ] 新增 `alert_copy.py` 集中生成文案；`alert_history` 增加 `message` 字段
+- [x] 股价提醒触发文案语义化（突破 / 回落 / 涨跌幅达阈值等），**全渠道**统一且**带股票名称**
+- [x] 覆盖 Toast、提醒列表、触发历史、邮件、Agent 工具返回
+- [x] 百分比提醒持久化元数据（`base_price`、`pct`、`direction`），文案可表达「较设置时上涨 X%」
+- [x] 新增 `alert_copy.py` 集中生成文案；`alert_history` 增加 `message` 字段
 
 ### 新闻与 Agent 工具
 
-- [ ] 新增 Agent 工具 `query_news`：按需从 akshare 实时拉取全量快讯
-- [ ] 筛选维度：内容关键词、板块（关键词 + 成分股关联）、指定股票、时间、数量
-- [ ] 板块成分股关联：akshare 概念/行业板块成分（`stock_board_concept_cons_em` 等）
-- [ ] 时间筛选：相对时间（`days` / `hours`）与绝对日期（`start_date` / `end_date`），同时传时以绝对日期为准
-- [ ] 新增 `news_query.py` 查询服务；现有 `query_notified_news` 保持不变
+- [x] 新增 Agent 工具 `query_news`：按需从 akshare 实时拉取全量快讯
+- [x] 筛选维度：内容关键词、板块（关键词 + 成分股关联）、指定股票、时间、数量
+- [x] 板块成分股关联：akshare 概念/行业板块成分（`stock_board_concept_cons_em` 等）
+- [x] 时间筛选：相对时间（`days` / `hours`）与绝对日期（`start_date` / `end_date`），同时传时以绝对日期为准
+- [x] 新增 `news_query.py` 查询服务；现有 `query_notified_news` 保持不变
 
 ### 本地模型
 
-- [ ] 设置页新增三个本地子预设：**Ollama**、**LM Studio**、**自定义本地**（均映射后端 `provider=local`）
-- [ ] 自动拉取已安装模型列表（Ollama `/api/tags`；LM Studio `/v1/models`）
-- [ ] 模型下拉选择 + 手动输入 fallback；API Key 可选（Ollama 默认 `ollama`）
-- [ ] 设置页展示工具调用能力建议（推荐 Qwen2.5、Llama 3.1+ 等）
-- [ ] 本地模型工具调用失败时，Agent 友好提示换模型或改用云端 API
-- [ ] 新增 `GET /config/local-models` 端点；持久化 `LOCAL_BACKEND` 便于 UI 还原子预设
+- [x] 设置页新增三个本地子预设：**Ollama**、**LM Studio**、**自定义本地**（均映射后端 `provider=local`）
+- [x] 自动拉取已安装模型列表（Ollama `/api/tags`；LM Studio `/v1/models`）
+- [x] 模型下拉选择 + 手动输入 fallback；API Key 可选（Ollama 默认 `ollama`）
+- [x] 设置页展示工具调用能力建议（推荐 Qwen2.5、Llama 3.1+ 等）
+- [x] 本地模型工具调用失败时，Agent 友好提示换模型或改用云端 API
+- [x] 新增 `GET /config/local-models` 端点；持久化 `LOCAL_BACKEND` 便于 UI 还原子预设
 
 ### 明确不进 v1.0.2
 
