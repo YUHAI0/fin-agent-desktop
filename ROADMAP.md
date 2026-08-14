@@ -107,10 +107,10 @@ Fin-Agent Desktop 1.0.1 已发布，详见 `docs/RELEASE-NOTES-1.0.1.md`。
 
 ---
 
-## v1.0.2 — 提醒文案与全量新闻查询 [计划中]
+## v1.0.2 — 提醒文案、全量新闻与本地模型 [计划中]
 
-> 目标：延续 v1.0.1 打磨思路，增强提醒可读性与 Agent 按需查新闻能力。  
-> 原则：不引入新页面模块；独立模块清晰边界；`query_notified_news`（本地已推送）与 `query_news`（实时拉取）职责分离。
+> 目标：延续 v1.0.1 打磨思路，增强提醒可读性、Agent 按需查新闻能力，以及桌面版本地模型配置体验。  
+> 原则：不引入新页面模块；独立模块清晰边界；后端已有能力优先暴露到 UI。
 
 ### 提醒系统
 
@@ -127,10 +127,20 @@ Fin-Agent Desktop 1.0.1 已发布，详见 `docs/RELEASE-NOTES-1.0.1.md`。
 - [ ] 时间筛选：相对时间（`days` / `hours`）与绝对日期（`start_date` / `end_date`），同时传时以绝对日期为准
 - [ ] 新增 `news_query.py` 查询服务；现有 `query_notified_news` 保持不变
 
+### 本地模型
+
+- [ ] 设置页新增三个本地子预设：**Ollama**、**LM Studio**、**自定义本地**（均映射后端 `provider=local`）
+- [ ] 自动拉取已安装模型列表（Ollama `/api/tags`；LM Studio `/v1/models`）
+- [ ] 模型下拉选择 + 手动输入 fallback；API Key 可选（Ollama 默认 `ollama`）
+- [ ] 设置页展示工具调用能力建议（推荐 Qwen2.5、Llama 3.1+ 等）
+- [ ] 本地模型工具调用失败时，Agent 友好提示换模型或改用云端 API
+- [ ] 新增 `GET /config/local-models` 端点；持久化 `LOCAL_BACKEND` 便于 UI 还原子预设
+
 ### 明确不进 v1.0.2
 
 - 新闻结果写入本地库 / 资讯流 UI 展示 → 后续版本
 - 板块关联走 Tushare `get_concept_detail` 替代方案 → 暂用 akshare 东财板块
+- 本地模型能力自动探测 / 标注 → 后续版本
 - 投资仪表盘、Watchlist、定时简报 → **v1.1 / v1.2**
 
 ---
