@@ -2,6 +2,7 @@ import { Routes, Route, useNavigate } from 'react-router-dom'
 import InputView from './components/InputView'
 import ChatView from './components/ChatView'
 import ConfigView from './components/ConfigView'
+import ProfileView from './components/ProfileView'
 import AboutView from './components/AboutView'
 import PortfolioView from './components/PortfolioView'
 import NewsView from './components/NewsView'
@@ -60,6 +61,7 @@ function App(): JSX.Element {
         <Route path="/input" element={<InputView />} />
         <Route path="/chat" element={<ChatView />} />
         <Route path="/config" element={<ConfigView />} />
+        <Route path="/profile" element={<ProfileView />} />
         <Route path="/about" element={<AboutView />} />
         <Route path="/portfolio" element={<PortfolioView />} />
         <Route path="/news" element={<NewsView />} />

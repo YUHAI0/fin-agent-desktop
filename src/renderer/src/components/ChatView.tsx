@@ -3,7 +3,7 @@ import { flushSync } from 'react-dom'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Settings, ChevronDown, ChevronRight, Check, Loader2, Terminal, Bell, Briefcase, Newspaper, ArrowUp, Square, Brain, Sun, Moon, Sparkles, Search, PanelLeft } from 'lucide-react'
+import { Settings, ChevronDown, ChevronRight, Check, Loader2, Terminal, Bell, Briefcase, Newspaper, ArrowUp, Square, Brain, Sun, Moon, Sparkles, Search, PanelLeft, CircleUser } from 'lucide-react'
 import { useChat, ChatBlock, Message } from '../contexts/ChatContext'
 import { useTheme } from '../contexts/ThemeContext'
 import { KlinePanel } from './KlinePanel'
@@ -976,6 +976,15 @@ const ChatView: React.FC = () => {
               aria-label="投资组合"
             >
               <Briefcase size={18} />
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/profile')}
+              className="fa-icon-btn focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--fa-accent)]"
+              title="投资画像"
+              aria-label="投资画像"
+            >
+              <CircleUser size={18} />
             </button>
             <button
               type="button"
