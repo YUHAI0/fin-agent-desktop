@@ -646,7 +646,16 @@ def handle_price_alert_pct(req):
         4,
     )
     scheduler = TaskScheduler()
-    task_id = scheduler.add_price_alert(ts_code, operator, threshold, email)
+    task_id = scheduler.add_price_alert(
+        ts_code,
+        operator,
+        threshold,
+        email,
+        alert_mode="pct",
+        base_price=price,
+        pct=pct,
+        direction=direction,
+    )
     return {
         "success": True,
         "task_id": task_id,

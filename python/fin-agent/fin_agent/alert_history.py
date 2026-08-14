@@ -19,6 +19,8 @@ _FIELDS = (
     "threshold",
     "price",
     "triggered_at",
+    "message",
+    "condition_label",
 )
 
 

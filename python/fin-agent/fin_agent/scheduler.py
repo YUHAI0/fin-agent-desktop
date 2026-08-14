@@ -8,6 +8,7 @@ import uuid
 from pathlib import Path
 from fin_agent.config import Config
 from fin_agent.notification import NotificationManager
+from fin_agent.alert_copy import format_alert, format_condition_label
 from fin_agent.alert_history import AlertHistoryStore
 
 
@@ -113,7 +114,17 @@ class TaskScheduler:
         except Exception as e:
             logger.error(f"Failed to save tasks: {e}")
 
-    def add_price_alert(self, ts_code, operator, threshold, email=None):
+    def add_price_alert(
+        self,
+        ts_code,
+        operator,
+        threshold,
+        email=None,
+        alert_mode=None,
+        base_price=None,
+        pct=None,
+        direction=None,
+    ):
         self.load_tasks()
         # 秒级 time.time() 在同秒连建两条时会撞 ID 并覆盖；用 uuid 保证唯一
         task_id = f"price_alert_{ts_code}_{uuid.uuid4().hex[:8]}"
@@ -127,6 +138,14 @@ class TaskScheduler:
             "enabled": True,
             "created_at": time.time()
         }
+        if alert_mode:
+            task["alert_mode"] = alert_mode
+        if base_price is not None:
+            task["base_price"] = float(base_price)
+        if pct is not None:
+            task["pct"] = float(pct)
+        if direction:
+            task["direction"] = direction
         self.tasks[task_id] = task
         self.save_tasks()
         return task_id
@@ -158,6 +177,9 @@ class TaskScheduler:
     def list_tasks_enriched(self):
         """列表附带股票名称与现价涨跌，供前端提醒弹窗展示（不写回 tasks.json）。"""
         tasks = [dict(t) for t in self.list_tasks()]
+        for t in tasks:
+            if t.get("type") == "price_alert":
+                t["condition_label"] = format_condition_label(t)
         codes = []
         seen = set()
         for t in tasks:
@@ -284,24 +306,19 @@ class TaskScheduler:
 
             if triggered:
                 stock_name = record.get('name') or ts_code
-                # 优化邮件标题，使其看起来更正规，减少被识别为垃圾邮件的可能
-                subject = f"[Fin-Agent] 股价提醒: {stock_name} ({ts_code}) 触发条件"
-                
-                # 优化纯文本内容
+                copy = format_alert(task, stock_name=stock_name, current_price=current_price)
+                subject = f"[Fin-Agent] {copy.title}"
+
                 content = (
                     f"股价提醒通知\n"
                     f"================================\n"
-                    f"股票名称: {stock_name}\n"
-                    f"股票代码: {ts_code}\n"
-                    f"当前价格: {current_price}\n"
-                    f"触发条件: 价格 {operator} {threshold}\n"
+                    f"{copy.message}\n"
                     f"触发时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
                     f"================================\n"
                     f"此邮件由 Fin-Agent 自动发送。"
                 )
-                
-                # 添加HTML内容，提升邮件质量
-                price_color = "#d9534f" if operator.startswith('>') else "#5cb85c" # 涨红跌绿(或根据涨跌逻辑调整)
+
+                price_color = "#d9534f" if operator.startswith('>') else "#5cb85c"
                 html_content = f"""
                 <!DOCTYPE html>
                 <html>
@@ -329,7 +346,7 @@ class TaskScheduler:
                             <h2>股价提醒通知</h2>
                         </div>
                         <div class="content">
-                            <p>您好，您关注的股票已触发提醒条件：</p>
+                            <p>{copy.message}</p>
                             <div class="stock-info">
                                 <div class="info-row">
                                     <span class="label">股票名称</span>
@@ -341,11 +358,11 @@ class TaskScheduler:
                                 </div>
                                 <div class="info-row">
                                     <span class="label">当前价格</span>
-                                    <span class="value price">{current_price}</span>
+                                    <span class="value price">{current_price:.2f}</span>
                                 </div>
                                 <div class="info-row">
                                     <span class="label">触发条件</span>
-                                    <span class="value">价格 {operator} {threshold}</span>
+                                    <span class="value">{copy.condition_label}</span>
                                 </div>
                             </div>
                             <p>触发时间：{time.strftime('%Y-%m-%d %H:%M:%S')}</p>
@@ -357,7 +374,7 @@ class TaskScheduler:
                 </body>
                 </html>
                 """
-                
+
                 print(f"\n[Scheduler] Triggering task {task['id']}: {subject}")
 
                 try:
@@ -368,22 +385,20 @@ class TaskScheduler:
                         "operator": operator,
                         "threshold": threshold,
                         "price": current_price,
+                        "message": copy.message,
+                        "condition_label": copy.condition_label,
                     })
                 except Exception as hist_err:
                     logger.error(
                         f"Failed to append alert history for {task['id']}: {hist_err}"
                     )
 
-                desktop_body = (
-                    f"{ts_code} 现价 {current_price:.2f}，"
-                    f"已触发条件 {operator} {threshold}"
-                )
                 try:
                     self.notification_sink({
                         "notification_id": f"price_alert_{task['id']}_{int(time.time())}",
                         "type": "price_alert",
-                        "title": f"股价提醒：{stock_name}",
-                        "body": desktop_body,
+                        "title": copy.title,
+                        "body": copy.body,
                         "task_id": task["id"],
                         "ts_code": ts_code,
                         "timestamp": time.time(),
