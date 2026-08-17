@@ -4,6 +4,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   get_stock_basic: '查询股票基本信息',
   get_daily_price: '查询日线行情',
   get_realtime_price: '查询实时价格',
+  get_new_share_quotes: '查询新股行情',
   get_daily_basic: '查询估值指标',
   get_income_statement: '查询利润表',
   get_index_daily: '查询指数行情',

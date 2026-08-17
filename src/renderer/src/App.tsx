@@ -10,6 +10,7 @@ import StockDetailView from './components/StockDetailView'
 import ToastView from './components/ToastView'
 import UpdateToastView from './components/UpdateToastView'
 import QuitConfirmModal from './components/QuitConfirmModal'
+import { handleDocumentLinkClick } from './components/ExternalLink'
 import { useEffect, useState } from 'react'
 
 function App(): JSX.Element {
@@ -33,9 +34,12 @@ function App(): JSX.Element {
         })
       : undefined
 
+    document.addEventListener('click', handleDocumentLinkClick, true)
+
     return () => {
       removeNavigateListener?.()
       removeQuitConfirmListener?.()
+      document.removeEventListener('click', handleDocumentLinkClick, true)
     }
   }, [navigate])
 

@@ -23,6 +23,7 @@ import { getDefaultQuickReplyOptions, normalizeSessionMessages } from '../utils/
 import { parseMaLadder } from '../utils/parseMaLadder'
 import { MaLadderPanel } from './MaLadderPanel'
 import { toolDisplayName } from '../utils/toolDisplayName'
+import { MarkdownExternalLink } from './ExternalLink'
 
 // ToolExecutionBlock type helper
 type ToolExecutionBlock = Extract<ChatBlock, { type: 'tool_execution' }>
@@ -179,7 +180,8 @@ const markdownComponents = {
         {children}
       </pre>
     )
-  }
+  },
+  a: MarkdownExternalLink
 }
 
 const SIDEBAR_STORAGE_KEY = 'fin-agent-sidebar'

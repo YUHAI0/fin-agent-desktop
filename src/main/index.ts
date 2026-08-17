@@ -1597,6 +1597,51 @@ function checkForUpdates(options?: { showWindow?: boolean }): Promise<UpdateChec
   })
 }
 
+function isHttpUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+function isAppInternalNavigation(url: string): boolean {
+  const renderer = process.env['ELECTRON_RENDERER_URL']
+  if (renderer && url.startsWith(renderer)) return true
+  try {
+    const parsed = new URL(url)
+    if (parsed.protocol !== 'file:') return false
+    const pathName = decodeURIComponent(parsed.pathname).replace(/\\/g, '/')
+    return pathName.endsWith('/index.html') || pathName.endsWith('index.html')
+  } catch {
+    return false
+  }
+}
+
+function openHttpExternal(url: string): Promise<void> {
+  if (!isHttpUrl(url)) return Promise.resolve()
+  return shell.openExternal(url).catch((err) => {
+    console.error('[Main] openExternal failed:', url, err)
+  })
+}
+
+function attachExternalLinkGuard(contents: Electron.WebContents): void {
+  contents.setWindowOpenHandler(({ url }) => {
+    void openHttpExternal(url)
+    return { action: 'deny' }
+  })
+  contents.on('will-navigate', (event, url) => {
+    if (isAppInternalNavigation(url)) return
+    event.preventDefault()
+    void openHttpExternal(url)
+  })
+}
+
+app.on('web-contents-created', (_event, contents) => {
+  attachExternalLinkGuard(contents)
+})
+
 app.whenReady().then(() => {
   electronApp.setAppUserModelId(APP_USER_MODEL_ID)
   ensureWindowsToastShortcut()
@@ -1842,17 +1887,9 @@ app.whenReady().then(() => {
     if (!target) {
       return { success: false, error: '链接为空' }
     }
-    let parsed: URL
-    try {
-      parsed = new URL(target)
-    } catch (e) {
-      console.error('[Main] open-external rejected invalid URL:', target)
-      return { success: false, error: '无效的链接地址' }
-    }
-    // 只允许 http/https，拒绝 file:/自定义协议等，防止渲染进程诱导打开本地文件
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      console.error('[Main] open-external rejected disallowed protocol:', parsed.protocol)
-      return { success: false, error: `不允许打开该类型的链接：${parsed.protocol}` }
+    if (!isHttpUrl(target)) {
+      console.error('[Main] open-external rejected invalid or disallowed URL:', target)
+      return { success: false, error: '只允许打开 http/https 链接' }
     }
     try {
       await shell.openExternal(target)

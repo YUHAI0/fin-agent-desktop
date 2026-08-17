@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Download, X, CheckCircle, AlertTriangle, Loader2 } from 'lucide-react'
+import { MarkdownExternalLink } from './ExternalLink'
 
 type Stage = 'available' | 'downloading' | 'done' | 'error'
 
@@ -234,7 +235,12 @@ export default function UpdateToastView(): JSX.Element {
       <div className="fa-update-toast-body">
         {showNotes && (
           <div ref={notesRef} className="fa-update-toast-notes prose prose-fa prose-sm max-w-none">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{info.releaseNotes}</ReactMarkdown>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={{ a: MarkdownExternalLink }}
+            >
+              {info.releaseNotes}
+            </ReactMarkdown>
           </div>
         )}
 

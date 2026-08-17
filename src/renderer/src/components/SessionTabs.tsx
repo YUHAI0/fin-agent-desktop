@@ -173,13 +173,14 @@ const SessionTabs: React.FC<SessionTabsProps> = ({
               >
                 <span className="min-w-0 flex-1 truncate">{tab.title}</span>
                 {streaming && (
-                  <Loader2
-                    size={14}
-                    strokeWidth={2}
-                    className="fa-sidebar-tab-spinner shrink-0"
-                    aria-hidden
-                    title="正在回复"
-                  />
+                  <span className="shrink-0" title="正在回复">
+                    <Loader2
+                      size={14}
+                      strokeWidth={2}
+                      className="fa-sidebar-tab-spinner"
+                      aria-hidden
+                    />
+                  </span>
                 )}
                 <button
                   type="button"

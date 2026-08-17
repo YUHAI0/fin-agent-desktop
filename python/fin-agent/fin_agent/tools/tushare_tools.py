@@ -1220,6 +1220,31 @@ BASE_TOOLS_SCHEMA = [
     {
         "type": "function",
         "function": {
+            "name": "get_new_share_quotes",
+            "description": "Query real-time quotes of newly listed A-shares (新股/次新股, Eastmoney new-share board: price, pct change, volume, list date). Use when the user asks about today's new stocks, IPO first-day/recent listing performance, or a list of 新股. Optional keyword or ts_code to filter; default sort by pct_chg descending, max 50 rows. For a single already-known listed stock price, prefer get_realtime_price.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "keyword": {
+                        "type": "string",
+                        "description": "Optional name or code fragment to filter, e.g. '中芯' or '688'."
+                    },
+                    "ts_code": {
+                        "type": "string",
+                        "description": "Optional stock code to look up one new share, e.g. '301559.SZ'."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max rows to return (1-50, default 20)."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_daily_basic",
             "description": "Get daily basic indicators including PE (Price-to-Earnings), PB (Price-to-Book), Turnover Rate, and Market Value.",
             "parameters": {
@@ -2007,6 +2032,8 @@ def execute_tool_call(tool_name, arguments):
         return market_tools.get_daily_price(**arguments)
     elif tool_name == "get_realtime_price":
         return market_tools.get_realtime_price(**arguments)
+    elif tool_name == "get_new_share_quotes":
+        return market_tools.get_new_share_quotes(**arguments)
     elif tool_name == "get_daily_basic":
         return market_tools.get_daily_basic(**arguments)
     elif tool_name == "get_income_statement":
