@@ -1926,11 +1926,27 @@ app.whenReady().then(() => {
     persistSeenNotificationsNow()
   })
 
-  ipcMain.on('submit-input', async (_, text, sessionId?: string) => {
+  type NewsCardPayload = {
+    intent: 'interpret' | 'portfolio_impact' | 'next_actions' | 'related_stocks'
+    news: {
+      id: string
+      title: string
+      summary: string
+      url: string
+      source: string
+      published_at: string
+      sentiment?: string | null
+      matched_symbols: string[]
+    }
+  }
+
+  ipcMain.on('submit-input', async (_, text, sessionId?: string, newsCard?: NewsCardPayload) => {
     console.log('[Main] Received submit-input:', text)
 
     const trimmed = (text || '').trim()
-    if (!trimmed) {
+    const hasNewsCard = newsCard != null && typeof newsCard === 'object'
+    const message = trimmed || (hasNewsCard ? '请解读这条新闻' : '')
+    if (!message) {
       return
     }
     
@@ -1960,7 +1976,7 @@ app.whenReady().then(() => {
     if (chatWindow) {
       chatWindow.show()
       chatWindow.focus()
-      chatWindow.webContents.send('new-message', { text: trimmed, sessionId })
+      chatWindow.webContents.send('new-message', { text: message, sessionId, newsCard })
 
       const reqKey = streamRequestKey(sessionId)
       const tagStream = (payload: Record<string, unknown>) => {
@@ -1972,7 +1988,11 @@ app.whenReady().then(() => {
       try {
         console.log('[Main] Sending POST to http://127.0.0.1:5678/chat')
 
-        const postData = JSON.stringify({ message: trimmed, session_id: sessionId })
+        const postBody: Record<string, unknown> = { message, session_id: sessionId }
+        if (hasNewsCard) {
+          postBody.news_card = newsCard
+        }
+        const postData = JSON.stringify(postBody)
         console.log('[Main] POST data:', postData)
         console.log('[Main] POST data length:', Buffer.byteLength(postData))
 

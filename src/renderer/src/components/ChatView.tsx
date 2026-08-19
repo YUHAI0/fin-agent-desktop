@@ -24,6 +24,8 @@ import { parseMaLadder } from '../utils/parseMaLadder'
 import { MaLadderPanel } from './MaLadderPanel'
 import { toolDisplayName } from '../utils/toolDisplayName'
 import { MarkdownExternalLink } from './ExternalLink'
+import NewsChatCard from './news/NewsChatCard'
+import { NEWS_CARD_INTENT_PROMPTS, type NewsCardPayload } from '../utils/chatPrefill'
 
 // ToolExecutionBlock type helper
 type ToolExecutionBlock = Extract<ChatBlock, { type: 'tool_execution' }>
@@ -224,7 +226,8 @@ const ChatView: React.FC = () => {
     ensureActiveSession,
     setSessionStreaming,
     isActiveSessionStreaming,
-    newSession
+    newSession,
+    consumePendingNewsCardSend
   } = useChat() // 使用 Context 中的消息历史
   const { theme, setTheme } = useTheme()
   const [input, setInput] = useState('')
@@ -251,6 +254,9 @@ const ChatView: React.FC = () => {
   const newSessionRef = useRef(newSession)
   newSessionRef.current = newSession
   const sendUserTextRef = useRef<(text: string) => Promise<void>>(async () => {})
+  const sendNewsCardRef = useRef<(payload: NewsCardPayload, sessionId: string) => Promise<void>>(
+    async () => {}
+  )
   const lastPrefillConsumedRef = useRef<{ text: string; at: number } | null>(null)
 
   useEffect(() => {
@@ -385,11 +391,21 @@ const ChatView: React.FC = () => {
     const removeListener = window.api.onNewMessage((payload) => {
       const text = typeof payload === 'string' ? payload : payload?.text
       const sessionId = typeof payload === 'string' ? undefined : payload?.sessionId
+      const newsCard = typeof payload === 'string' ? undefined : payload?.newsCard
       console.log('[ChatView] Received new-message:', text, sessionId)
-      if (!text) return
+      if (!text && !newsCard) return
 
       const routeMessage = (sid?: string) => {
-        applyToSession(sid, (prev) => [...prev, { role: 'user', content: text, blocks: [] }])
+        applyToSession(sid, (prev) => [
+          ...prev,
+          newsCard
+            ? {
+                role: 'user',
+                content: newsCard.news.title,
+                blocks: [{ type: 'news_card', intent: newsCard.intent, news: newsCard.news }]
+              }
+            : { role: 'user', content: text || '', blocks: [] }
+        ])
         markResponding(sid, true)
       }
 
@@ -805,6 +821,24 @@ const ChatView: React.FC = () => {
   }
   sendUserTextRef.current = sendUserText
 
+  const sendNewsCard = async (payload: NewsCardPayload, sessionId: string) => {
+    const prompt = NEWS_CARD_INTENT_PROMPTS[payload.intent]
+    window.api.submitInput(prompt, sessionId, payload)
+    markResponding(sessionId, true)
+  }
+  sendNewsCardRef.current = sendNewsCard
+
+  useEffect(() => {
+    const run = () => {
+      const pending = consumePendingNewsCardSend()
+      if (!pending) return
+      void sendNewsCardRef.current(pending.payload, pending.sessionId)
+    }
+    run()
+    window.addEventListener('fa-news-card-send', run)
+    return () => window.removeEventListener('fa-news-card-send', run)
+  }, [consumePendingNewsCardSend])
+
   const consumePrefill = (raw: string) => {
     const text = raw.trim()
     if (!text) return
@@ -1025,7 +1059,13 @@ const ChatView: React.FC = () => {
             className="flex-1 overflow-y-auto px-4 py-8 md:px-8 no-drag"
           >
             <div className="mx-auto w-full max-w-3xl space-y-8">
-              {displayMessages.map((msg, idx) => (
+              {displayMessages.map((msg, idx) => {
+                const newsCardBlock =
+                  msg.role === 'user'
+                    ? (msg.blocks || []).find((b) => b.type === 'news_card')
+                    : undefined
+                const hasNewsCard = newsCardBlock?.type === 'news_card'
+                return (
               <div
                 key={idx}
                 className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start w-full'}`}
@@ -1033,12 +1073,20 @@ const ChatView: React.FC = () => {
                 <div
                   className={
                     msg.role === 'user'
-                      ? 'fa-user-bubble max-w-[min(90%,32rem)] rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed text-[var(--fa-text)]'
+                      ? hasNewsCard
+                        ? 'max-w-[min(90%,28rem)] p-0 bg-transparent'
+                        : 'fa-user-bubble max-w-[min(90%,32rem)] rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed text-[var(--fa-text)]'
                       : 'w-full min-w-0 max-w-full py-0.5 text-[15px] leading-relaxed text-[var(--fa-text)]'
                   }
                 >
                   {msg.role === 'user' ? (
-                    msg.content
+                    newsCardBlock?.type === 'news_card' ? (
+                      <NewsChatCard
+                        payload={{ intent: newsCardBlock.intent, news: newsCardBlock.news }}
+                      />
+                    ) : (
+                      msg.content
+                    )
                   ) : (
                     <div className="w-full space-y-4">
                       {(msg.blocks || []).map((block, bIdx) => {
@@ -1109,7 +1157,8 @@ const ChatView: React.FC = () => {
                   )}
                 </div>
               </div>
-            ))}
+                )
+            })}
             {isTyping && (
               <div className="flex w-full min-w-0 justify-start">
                 <div className="flex items-center gap-1 py-2 text-[var(--fa-faint)]">

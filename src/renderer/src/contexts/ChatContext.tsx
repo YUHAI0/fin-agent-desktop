@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
+import type { NewsCardPayload } from '../utils/chatPrefill'
 import { normalizeSessionMessages } from '../utils/welcomeAgentMessage'
 
 export type ChatBlock =
@@ -16,6 +17,20 @@ export type ChatBlock =
       callIndex?: number
       /** 流式拼接的 tool call id，与 tool_result 对齐 */
       callId?: string
+    }
+  | {
+      type: 'news_card'
+      intent: 'interpret' | 'portfolio_impact' | 'next_actions' | 'related_stocks'
+      news: {
+        id: string
+        title: string
+        summary: string
+        url: string
+        source: string
+        published_at: string
+        sentiment?: string | null
+        matched_symbols: string[]
+      }
     }
 
 export interface Message {
@@ -46,6 +61,10 @@ interface ChatContextType {
   refreshTabs: () => Promise<void>
   /** 跳转聊天并预填；若当前会话正在流式则先新开会话 */
   requestPrefill: (text: string) => Promise<void>
+  /** 强制新会话后发送新闻卡片分析（不走 prefill 字符串） */
+  requestNewsCardAnalysis: (payload: NewsCardPayload) => Promise<void>
+  /** ChatView 消费待发送的新闻卡片；读一次即清空 */
+  consumePendingNewsCardSend: () => { payload: NewsCardPayload; sessionId: string } | null
   setSessionStreaming: (sessionId: string, streaming: boolean) => void
   isActiveSessionStreaming: () => boolean
   isSessionStreaming: (sessionId: string) => boolean
@@ -94,6 +113,7 @@ function resolveMessages(action: MessagesUpdater, current: Message[]): Message[]
 }
 
 const PREFILL_STORAGE_KEY = 'fa-prefill'
+const NEWS_CARD_SEND_EVENT = 'fa-news-card-send'
 
 export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const navigate = useNavigate()
@@ -240,6 +260,14 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     [isActiveSessionStreaming, navigate, newSession]
   )
 
+  const pendingNewsCardRef = useRef<{ payload: NewsCardPayload; sessionId: string } | null>(null)
+
+  const consumePendingNewsCardSend = useCallback(() => {
+    const pending = pendingNewsCardRef.current
+    pendingNewsCardRef.current = null
+    return pending
+  }, [])
+
   // Toast 等跨窗口预填：走 requestPrefill，避免 navigate-route ?prefill= 绕过流式保护
   useEffect(() => {
     const remove = window.api.onChatPrefill?.((text: string) => {
@@ -275,6 +303,40 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     },
     [openSession]
+  )
+
+  const requestNewsCardAnalysis = useCallback(
+    async (payload: NewsCardPayload) => {
+      const title = (payload?.news?.title || '').trim()
+      if (!title) return
+
+      try {
+        const status = await window.api.checkConfig()
+        if (!status.configured) {
+          navigate('/config')
+          return
+        }
+      } catch {
+        navigate('/config')
+        return
+      }
+
+      try { sessionStorage.removeItem('fa-prefill') } catch { /* ignore */ }
+
+      await newSession()
+      let sessionId: string
+      try {
+        sessionId = await ensureActiveSession(title)
+      } catch (err) {
+        console.error('[ChatContext] requestNewsCardAnalysis ensureActiveSession failed:', err)
+        throw new Error('新建对话失败，请稍后重试')
+      }
+
+      pendingNewsCardRef.current = { payload, sessionId }
+      navigate('/chat')
+      window.dispatchEvent(new CustomEvent(NEWS_CARD_SEND_EVENT))
+    },
+    [ensureActiveSession, navigate, newSession]
   )
 
   const archiveTab = useCallback(
@@ -383,6 +445,8 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         ensureActiveSession,
         refreshTabs,
         requestPrefill,
+        requestNewsCardAnalysis,
+        consumePendingNewsCardSend,
         setSessionStreaming,
         isActiveSessionStreaming,
         isSessionStreaming

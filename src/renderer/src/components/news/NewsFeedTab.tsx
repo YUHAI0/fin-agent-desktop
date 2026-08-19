@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, ExternalLink, FileText, Loader2, Search, X } from 'lucide-react'
 import FaSelect from '../FaSelect'
 import { useAppDialog } from '../../contexts/AppDialogContext'
+import { useChat } from '../../contexts/ChatContext'
 import {
   NEWS_SOURCE_LABELS,
   NEWS_SENTIMENT_LABELS,
@@ -12,8 +13,24 @@ import {
   sentimentBadgeClass
 } from '../../utils/news'
 import { matchNewsToHoldings, type NewsHolding } from '../../utils/newsPortfolioMatch'
+import {
+  NEWS_CARD_FIXED_MENU,
+  buildNewsCardPayload,
+  shouldShowRelatedStocksMenu,
+  type NewsCardIntent
+} from '../../utils/chatPrefill'
+import NewsFeedContextMenu from './NewsFeedContextMenu'
 
 const PAGE_SIZE = 20
+const MENU_WIDTH = 200
+const MENU_HEIGHT = 176
+
+function clampMenuPosition(x: number, y: number): { x: number; y: number } {
+  return {
+    x: Math.max(8, Math.min(x, window.innerWidth - MENU_WIDTH)),
+    y: Math.max(8, Math.min(y, window.innerHeight - MENU_HEIGHT))
+  }
+}
 
 export interface NewsFocusRequest {
   seq: number
@@ -57,6 +74,11 @@ const NewsFeedTab: React.FC<NewsFeedTabProps> = ({
   const [manualRefreshing, setManualRefreshing] = useState(false)
   const [highlightId, setHighlightId] = useState('')
   const [holdings, setHoldings] = useState<NewsHolding[]>([])
+  const [ctxMenu, setCtxMenu] = useState<{
+    x: number
+    y: number
+    item: NotifiedNewsItem
+  } | null>(null)
 
   const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map())
   const skipFirstManualToken = useRef(true)
@@ -66,6 +88,7 @@ const NewsFeedTab: React.FC<NewsFeedTabProps> = ({
   const requestSeqRef = useRef(0)
   const ensuredFocusSeqRef = useRef<number | null>(null)
   const { alert } = useAppDialog()
+  const { requestNewsCardAnalysis } = useChat()
 
   const subscriptionNameMap = useMemo(() => {
     const map = new Map<string, NewsSubscription>()
@@ -304,6 +327,30 @@ const NewsFeedTab: React.FC<NewsFeedTabProps> = ({
     }
   }
 
+  const menuItems = ctxMenu
+    ? [
+        ...NEWS_CARD_FIXED_MENU,
+        ...(shouldShowRelatedStocksMenu(ctxMenu.item, holdings)
+          ? [{ intent: 'related_stocks' as const, label: '分析相关个股' }]
+          : [])
+      ]
+    : []
+
+  const handleAnalyzeIntent = async (intent: NewsCardIntent) => {
+    if (!ctxMenu) return
+    const payload = buildNewsCardPayload(intent, ctxMenu.item, holdings)
+    setCtxMenu(null)
+    if (!payload) return
+    try {
+      await requestNewsCardAnalysis(payload)
+    } catch (e) {
+      await alert({
+        title: '发送失败',
+        message: e instanceof Error ? e.message : '新建对话失败，请稍后重试'
+      })
+    }
+  }
+
   const monitorWarning = monitorStatus && !monitorStatus.running
   const monitorError = monitorStatus?.last_error
   const sourceHealth = monitorStatus?.source_health
@@ -435,7 +482,10 @@ const NewsFeedTab: React.FC<NewsFeedTabProps> = ({
         </div>
       )}
 
-      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 py-3">
+      <div
+        className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 py-3"
+        onScroll={() => setCtxMenu(null)}
+      >
         {loading && items.length === 0 && (
           <div className="flex items-center justify-center gap-2 py-16 text-sm text-[var(--fa-muted)]">
             <Loader2 className="animate-spin" size={16} />
@@ -485,10 +535,22 @@ const NewsFeedTab: React.FC<NewsFeedTabProps> = ({
                     role="button"
                     tabIndex={0}
                     onClick={() => void handleOpenItem(item)}
+                    onContextMenu={(e) => {
+                      e.preventDefault()
+                      const pos = clampMenuPosition(e.clientX, e.clientY)
+                      setCtxMenu({ x: pos.x, y: pos.y, item })
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault()
+                        if (ctxMenu) return
                         void handleOpenItem(item)
+                      }
+                      if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
+                        e.preventDefault()
+                        const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect()
+                        const pos = clampMenuPosition(rect.left + 12, rect.top + 12)
+                        setCtxMenu({ x: pos.x, y: pos.y, item })
                       }
                     }}
                     className={[
@@ -570,6 +632,17 @@ const NewsFeedTab: React.FC<NewsFeedTabProps> = ({
           </div>
         )}
       </div>
+
+      {ctxMenu && (
+        <NewsFeedContextMenu
+          x={ctxMenu.x}
+          y={ctxMenu.y}
+          items={menuItems}
+          disabled={!(ctxMenu.item.title || '').trim()}
+          onSelect={(intent) => void handleAnalyzeIntent(intent)}
+          onClose={() => setCtxMenu(null)}
+        />
+      )}
     </div>
   )
 }

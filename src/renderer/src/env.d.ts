@@ -338,15 +338,39 @@ interface PriceAlertNotificationOpenPayload {
   tsCode?: string
 }
 
+type NewsCardIntent = 'interpret' | 'portfolio_impact' | 'next_actions' | 'related_stocks'
+
+interface NewsCardSnapshot {
+  id: string
+  title: string
+  summary: string
+  url: string
+  source: string
+  published_at: string
+  sentiment?: string | null
+  matched_symbols: string[]
+}
+
+interface NewsCardPayload {
+  intent: NewsCardIntent
+  news: NewsCardSnapshot
+}
+
+interface ChatNewMessagePayload {
+  text: string
+  sessionId?: string
+  newsCard?: NewsCardPayload
+}
+
 declare interface Window {
   api: {
-    submitInput: (text: string, sessionId?: string) => void
+    submitInput: (text: string, sessionId?: string, newsCard?: NewsCardPayload) => void
     stopGeneration: (sessionId?: string) => void
     resizeInput: (height: number) => void
     getVersion: () => Promise<string>
     getConfigDir: () => Promise<string>
     onNewMessage: (
-      callback: (payload: { text: string; sessionId?: string } | string) => void
+      callback: (payload: ChatNewMessagePayload | string) => void
     ) => () => void
     onBotResponse: (callback: (data: any) => void) => () => void
     onBotStream: (callback: (data: any) => void) => () => void

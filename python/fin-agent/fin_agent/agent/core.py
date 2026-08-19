@@ -26,9 +26,33 @@ def _maybe_append_local_hint(msg: str) -> str:
     return f"{msg}\n\n{_LOCAL_LLM_HINT}"
 
 
+# 单条工具结果写入 LLM 历史的上限（界面仍可展示完整结果）
+_TOOL_RESULT_MAX_CHARS = 12_000
+# 发给模型的消息总字符预算（偏保守，兼容 128k / 1M 窗口）
+_LLM_HISTORY_MAX_CHARS = 180_000
+_LLM_HISTORY_RETRY_CHARS = 60_000
+_OLD_TOOL_RESULT_CHARS = 600
+
+
+def _is_context_overflow(exc: Exception) -> bool:
+    text = str(exc).casefold()
+    return (
+        "maximum context length" in text
+        or "context_length_exceeded" in text
+        or "context window" in text
+        or "reduce the length of the messages" in text
+        or ("requested" in text and "tokens" in text and "maximum" in text)
+    )
+
+
 def _format_llm_error(exc: Exception) -> str:
     text = str(exc)
     lowered = text.casefold()
+    if _is_context_overflow(exc):
+        return (
+            "当前对话过长，已超出模型上下文上限。\n"
+            "请点击「新对话」后再提问；本轮已尝试压缩历史，仍无法放入模型窗口。"
+        )
     if "not found" in lowered and "model" in lowered:
         model = Config.OPENAI_MODEL or "未知"
         return (
@@ -37,6 +61,182 @@ def _format_llm_error(exc: Exception) -> str:
             f"或在终端运行：ollama pull {model}"
         )
     return f"Error: {text}"
+
+
+def _msg_role(msg) -> str:
+    if isinstance(msg, dict):
+        return msg.get("role") or ""
+    return getattr(msg, "role", None) or ""
+
+
+def _message_chars(msg) -> int:
+    if isinstance(msg, dict):
+        n = len(str(msg.get("content") or ""))
+        tool_calls = msg.get("tool_calls")
+        if tool_calls:
+            n += len(json.dumps(tool_calls, ensure_ascii=False, default=str))
+        return n
+    content = getattr(msg, "content", "") or ""
+    tool_calls = getattr(msg, "tool_calls", None)
+    n = len(str(content))
+    if tool_calls:
+        n += len(json.dumps(tool_calls, ensure_ascii=False, default=str))
+    return n
+
+
+def _truncate_tool_content(text: str, max_chars: int) -> str:
+    if not text or len(text) <= max_chars:
+        return text
+    stripped = text.strip()
+    note = f"仅保留部分数据，原文 {len(text)} 字符。如需更早区间请缩小日期后再查。"
+    if stripped.startswith("[") and stripped.endswith("]"):
+        try:
+            data = json.loads(stripped)
+            if isinstance(data, list) and data:
+                kept = []
+                budget = max(200, max_chars - 180)
+                size = 80
+                for item in reversed(data):
+                    chunk = json.dumps(item, ensure_ascii=False, default=str)
+                    if kept and size + len(chunk) + 2 > budget:
+                        break
+                    kept.append(item)
+                    size += len(chunk) + 1
+                kept.reverse()
+                payload = [{"_truncated": True, "_original_rows": len(data), "_note": note}] + kept
+                out = json.dumps(payload, ensure_ascii=False, default=str)
+                if len(out) <= max_chars:
+                    return out
+        except (json.JSONDecodeError, TypeError, ValueError):
+            pass
+    return text[:max_chars] + f"\n…({note})"
+
+
+def _shrink_tool_payloads(history, max_chars: int = _TOOL_RESULT_MAX_CHARS):
+    """截断已写入历史的 tool 内容，避免会话文件与下次请求继续膨胀。"""
+    out = []
+    for msg in history:
+        if isinstance(msg, dict) and msg.get("role") == "tool":
+            content = msg.get("content")
+            if isinstance(content, str) and len(content) > max_chars:
+                msg = dict(msg)
+                msg["content"] = _truncate_tool_content(content, max_chars)
+        out.append(msg)
+    return out
+
+
+def _split_turns(messages):
+    """按 user → assistant → tool* 切成完整轮次，避免裁剪后留下孤立 tool 消息。"""
+    turns = []
+    i = 0
+    n = len(messages)
+    while i < n:
+        role = _msg_role(messages[i])
+        if role == "tool":
+            i += 1
+            continue
+        turn = []
+        if role == "user":
+            turn.append(messages[i])
+            i += 1
+        if i < n and _msg_role(messages[i]) == "assistant":
+            assistant = messages[i]
+            turn.append(assistant)
+            i += 1
+            has_tools = False
+            if isinstance(assistant, dict):
+                has_tools = bool(assistant.get("tool_calls"))
+            else:
+                has_tools = bool(getattr(assistant, "tool_calls", None))
+            if has_tools:
+                while i < n and _msg_role(messages[i]) == "tool":
+                    turn.append(messages[i])
+                    i += 1
+        if turn:
+            turns.append(turn)
+        elif i < n:
+            i += 1
+    return turns
+
+
+def _fit_messages_for_llm(history, max_chars: int = _LLM_HISTORY_MAX_CHARS):
+    """构造发给模型的窗口：保留 system + 最近若干完整轮次，并压缩旧工具结果。"""
+    history = _shrink_tool_payloads(history)
+    system = []
+    rest = []
+    for msg in history:
+        if _msg_role(msg) == "system" and not system:
+            system.append(msg)
+        elif _msg_role(msg) != "system":
+            rest.append(msg)
+
+    tool_indexes = [
+        i for i, msg in enumerate(rest)
+        if isinstance(msg, dict) and msg.get("role") == "tool"
+    ]
+    keep_full = set(tool_indexes[-2:])
+    compacted = []
+    for i, msg in enumerate(rest):
+        if (
+            isinstance(msg, dict)
+            and msg.get("role") == "tool"
+            and i not in keep_full
+        ):
+            content = msg.get("content")
+            if isinstance(content, str) and len(content) > _OLD_TOOL_RESULT_CHARS:
+                msg = dict(msg)
+                msg["content"] = _truncate_tool_content(content, _OLD_TOOL_RESULT_CHARS)
+        compacted.append(msg)
+
+    turns = _split_turns(compacted)
+    kept_turns = []
+    total = sum(_message_chars(m) for m in system)
+    for turn in reversed(turns):
+        turn_len = sum(_message_chars(m) for m in turn)
+        if kept_turns and total + turn_len > max_chars:
+            break
+        kept_turns.insert(0, turn)
+        total += turn_len
+
+    fitted = list(system)
+    for turn in kept_turns:
+        fitted.extend(turn)
+
+    if sum(_message_chars(m) for m in fitted) > max_chars:
+        fitted = _shrink_tool_payloads(fitted, max_chars=min(2000, max_chars // 4 or 500))
+    return fitted
+
+
+_NEWS_CARD_INTENT_PROMPTS = {
+    "interpret": "请解读这条新闻",
+    "portfolio_impact": "请分析这条新闻对我当前持仓的影响",
+    "next_actions": "请根据这条新闻给出可执行的下一步",
+    "related_stocks": "请分析这条新闻涉及的相关个股",
+}
+
+
+def format_news_card_user_message(news_card):
+    """把资讯流卡片编成模型 user 文本：短意图 + 附件，不是用户手打长文。"""
+    if not isinstance(news_card, dict):
+        return ""
+    intent = str(news_card.get("intent") or "interpret").strip()
+    prompt = _NEWS_CARD_INTENT_PROMPTS.get(intent, _NEWS_CARD_INTENT_PROMPTS["interpret"])
+    news = news_card.get("news") if isinstance(news_card.get("news"), dict) else news_card
+    payload = {
+        "id": news.get("id") or "",
+        "title": news.get("title") or "",
+        "summary": news.get("summary") or "",
+        "url": news.get("url") or "",
+        "source": news.get("source") or "",
+        "published_at": news.get("published_at") or "",
+        "sentiment": news.get("sentiment"),
+        "matched_symbols": news.get("matched_symbols") or [],
+    }
+    return (
+        f"{prompt}\n\n<news_card>\n"
+        f"{json.dumps(payload, ensure_ascii=False)}\n"
+        "</news_card>"
+    )
 
 
 class FinAgent:
@@ -192,14 +392,14 @@ class FinAgent:
         history = body.get("llm_history") or []
         if not history:
             return "No saved session found."
-        self.history = history
+        self.history = _shrink_tool_payloads(history)
         return "Session loaded."
 
     def clear_history(self):
         """Clear conversation history (keep system prompt)."""
         self._init_history()
 
-    def stream_chat(self, user_input):
+    def stream_chat(self, user_input, news_card=None):
         """
         Generator function that yields events for the chat interaction.
         Yields dicts with 'type' and 'content'/'data'.
@@ -207,7 +407,13 @@ class FinAgent:
         """
         import sys
         from fin_agent.utils import debug_print
-        debug_print(f"Starting stream_chat with input: {user_input[:50]}...", file=sys.stderr)
+
+        user_content = user_input
+        if news_card:
+            formatted = format_news_card_user_message(news_card)
+            if formatted:
+                user_content = formatted
+        debug_print(f"Starting stream_chat with input: {user_content[:50]}...", file=sys.stderr)
         
         # Check if LLM is valid
         if not self.llm:
@@ -221,9 +427,11 @@ class FinAgent:
              self.history.insert(0, {"role": "system", "content": self._get_system_content()})
 
         # Append user input
-        self.history.append({"role": "user", "content": user_input})
+        self.history.append({"role": "user", "content": user_content})
+        self.history = _shrink_tool_payloads(self.history)
 
         step = 0
+        context_retries = 0
         try:
             while True:
                 step += 1
@@ -234,7 +442,9 @@ class FinAgent:
                     stream_mode = True 
                     
                     debug_print("Calling LLM chat...", file=sys.stderr)
-                    response = self.llm.chat(self.history, tools=TOOLS_SCHEMA, tool_choice="auto", stream=stream_mode)
+                    budget = _LLM_HISTORY_MAX_CHARS if context_retries == 0 else _LLM_HISTORY_RETRY_CHARS
+                    llm_messages = _fit_messages_for_llm(self.history, max_chars=budget)
+                    response = self.llm.chat(llm_messages, tools=TOOLS_SCHEMA, tool_choice="auto", stream=stream_mode)
                     debug_print(f"LLM chat returned {type(response)}", file=sys.stderr)
                     
                     message = None
@@ -403,6 +613,14 @@ class FinAgent:
 
                 except Exception as e:
                     import traceback
+                    if _is_context_overflow(e) and context_retries < 1:
+                        context_retries += 1
+                        self.history = _shrink_tool_payloads(self.history, max_chars=1500)
+                        debug_print(
+                            "Context overflow, retrying with compacted history",
+                            file=sys.stderr,
+                        )
+                        continue
                     err_msg = _format_llm_error(e)
                     if Config.LLM_PROVIDER == "local" and "未安装该模型" not in err_msg:
                         err_msg = _maybe_append_local_hint(err_msg)
@@ -413,6 +631,8 @@ class FinAgent:
                 if not message:
                     debug_print("Message is None after loop!", file=sys.stderr)
                     return
+
+                context_retries = 0
 
                 # If no tool calls, this is the final answer
                 if not message.tool_calls:
@@ -448,11 +668,11 @@ class FinAgent:
                         "result": str(tool_result),
                     }
 
-                    # Append tool result to history
+                    # Append tool result to history（截断后写入，避免下次请求再次超限）
                     self.history.append({
                         "role": "tool",
                         "tool_call_id": call_id,
-                        "content": str(tool_result)
+                        "content": _truncate_tool_content(str(tool_result), _TOOL_RESULT_MAX_CHARS),
                     })
 
         except KeyboardInterrupt:

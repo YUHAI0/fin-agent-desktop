@@ -647,15 +647,56 @@ class NewsMonitor:
             "groups": groups,
         }
 
+    @staticmethod
+    def _live_pending_subscription_ids(item, subscriptions_by_id, portfolio_symbols):
+        """发送前再按当前订阅与持仓过滤，避免已删持仓仍弹出「持仓新闻」。"""
+        live = []
+        holdings = set(portfolio_symbols or [])
+        for sid in item.get("pending_subscription_ids") or []:
+            subscription = subscriptions_by_id.get(sid)
+            if not subscription or not subscription.get("enabled", True):
+                continue
+            if subscription.get("type") == "portfolio":
+                matched = set(item.get("matched_symbols") or [])
+                if not (matched & holdings):
+                    continue
+            live.append(sid)
+        return live
+
     def _dispatch_pending_notifications(self, subscriptions):
         with self._sink_lock:
             inflight_ids = set(self._sink_item_ids)
-        items = [
+        raw_items = [
             item for item in self.history_store.list_pending_notifications()
             if item.get("id") not in inflight_ids
         ]
+        if not raw_items:
+            return None
+
+        subscriptions_by_id = {
+            subscription["id"]: subscription
+            for subscription in subscriptions
+            if subscription.get("id")
+        }
+        portfolio_symbols = self._portfolio_symbols()
+        items = []
+        stale_ids = []
+        for item in raw_items:
+            live_ids = self._live_pending_subscription_ids(
+                item, subscriptions_by_id, portfolio_symbols,
+            )
+            news_id = item.get("id")
+            if not live_ids:
+                if news_id:
+                    stale_ids.append(news_id)
+                continue
+            item["_notification_subscription_ids"] = live_ids
+            items.append(item)
+        if stale_ids:
+            self.history_store.mark_notifications_dispatched(stale_ids)
         if not items:
             return None
+
         if not self._sink_slots.acquire(blocking=False):
             logger.warning(
                 "News notification queue backlog: pending=%d, in_flight=%d, "
@@ -665,10 +706,6 @@ class NewsMonitor:
             return None
 
         item_ids = [item["id"] for item in items]
-        for item in items:
-            item["_notification_subscription_ids"] = item.get(
-                "pending_subscription_ids", []
-            )
         payload = self._build_payload(subscriptions, items)
         with self._sink_lock:
             self._sink_item_ids.update(item_ids)

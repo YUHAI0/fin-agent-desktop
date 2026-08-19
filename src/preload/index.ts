@@ -23,7 +23,27 @@ function createChannelBridge<T>(channel: string) {
   }
 }
 
-const onNewMessageBridge = createChannelBridge<{ text: string; sessionId?: string } | string>('new-message')
+type NewsCardPayload = {
+  intent: 'interpret' | 'portfolio_impact' | 'next_actions' | 'related_stocks'
+  news: {
+    id: string
+    title: string
+    summary: string
+    url: string
+    source: string
+    published_at: string
+    sentiment?: string | null
+    matched_symbols: string[]
+  }
+}
+
+type ChatNewMessagePayload = {
+  text: string
+  sessionId?: string
+  newsCard?: NewsCardPayload
+}
+
+const onNewMessageBridge = createChannelBridge<ChatNewMessagePayload | string>('new-message')
 const onBotResponseBridge = createChannelBridge<any>('bot-response')
 const onBotStreamBridge = createChannelBridge<any>('bot-stream')
 const onFocusInputBridge = createChannelBridge<void>('focus-input')
@@ -121,7 +141,8 @@ type PositionPayload = {
 
 // Custom APIs for renderer
 const api = {
-  submitInput: (text: string, sessionId?: string) => ipcRenderer.send('submit-input', text, sessionId),
+  submitInput: (text: string, sessionId?: string, newsCard?: NewsCardPayload) =>
+    ipcRenderer.send('submit-input', text, sessionId, newsCard),
   stopGeneration: (sessionId?: string) => ipcRenderer.send('stop-generation', sessionId),
   resizeInput: (height: number) => ipcRenderer.send('resize-input', height),
   getVersion: () => ipcRenderer.invoke('get-version'),
@@ -148,7 +169,7 @@ const api = {
     }
   },
   onNewMessage: (
-    callback: (payload: { text: string; sessionId?: string } | string) => void
+    callback: (payload: ChatNewMessagePayload | string) => void
   ) => onNewMessageBridge(callback),
   onNavigate: (callback: (route: string) => void) => onNavigateBridge(callback),
   onChatPrefill: (callback: (text: string) => void) => onChatPrefillBridge(callback),

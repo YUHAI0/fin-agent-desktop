@@ -1058,6 +1058,18 @@ body {
     color: var(--fa-accent);
   }
 
+  .fa-news-chat-card {
+    @apply w-full max-w-[min(100%,28rem)] rounded-2xl border px-4 py-3 text-left;
+    border-color: var(--fa-border);
+    background: var(--fa-surface);
+  }
+
+  .fa-news-chat-intent {
+    @apply inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[10px] font-medium;
+    color: var(--fa-accent);
+    background: var(--fa-accent-soft);
+  }
+
   .fa-news-dot {
     @apply inline-block h-1.5 w-1.5 shrink-0 rounded-full;
     background: var(--fa-accent);
@@ -1110,6 +1122,28 @@ body {
     border-color: color-mix(in srgb, var(--fa-accent) 45%, var(--fa-border));
     background: var(--fa-accent-soft);
     color: var(--fa-text);
+  }
+
+  .fa-news-ctx-backdrop {
+    @apply fixed inset-0 z-50;
+  }
+
+  .fa-news-ctx-menu {
+    @apply absolute z-50 min-w-[12rem] overflow-hidden rounded-xl border py-1 shadow-lg;
+    border-color: var(--fa-border);
+    background: var(--fa-surface);
+  }
+
+  .fa-news-ctx-item {
+    @apply block w-full cursor-pointer px-3 py-2 text-left text-sm text-[var(--fa-text)] transition-colors duration-150;
+  }
+
+  .fa-news-ctx-item:hover:not(:disabled) {
+    background: var(--fa-surface-hover);
+  }
+
+  .fa-news-ctx-item:disabled {
+    @apply cursor-not-allowed opacity-40;
   }
 
   /* ── 应用内浮动通知 (Toast 窗口路由) ─────────────────────────────────────── */

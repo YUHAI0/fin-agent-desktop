@@ -61,7 +61,7 @@ else:
     debug_print(f"repo_root does not exist: {repo_root}")
 
 try:
-    from fin_agent.agent.core import FinAgent
+    from fin_agent.agent.core import FinAgent, _shrink_tool_payloads
     from fin_agent.config import Config
     from fin_agent.scheduler import TaskScheduler
     from fin_agent.alert_history import AlertHistoryStore
@@ -385,7 +385,7 @@ def build_session_agent(session_id):
         body = {"llm_history": []}
     history = body.get("llm_history") or []
     if history:
-        agent_instance.history = history
+        agent_instance.history = _shrink_tool_payloads(history)
     return agent_instance
 
 TITLE_PROMPT = (
@@ -1306,6 +1306,9 @@ class RequestHandler(BaseHTTPRequestHandler):
         try:
             data = json.loads(post_data.decode('utf-8'))
             user_input = data.get('message')
+            news_card = data.get("news_card")
+            if news_card is not None and not isinstance(news_card, dict):
+                news_card = None
             debug_print(f"User input: {user_input}")
 
             session_id = data.get('session_id')
@@ -1336,7 +1339,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 # Use stream_chat generator which yields structured events
                 # debug_print("Starting event loop in api.py", file=sys.stderr)
                 event_count = 0
-                for event in active_agent.stream_chat(user_input):
+                for event in active_agent.stream_chat(user_input, news_card=news_card):
                     event_count += 1
                     payload = json.dumps(event)
                     # debug_print(f"Event #{event_count}: {event.get('type', 'unknown')} - {str(event)[:100]}", file=sys.stderr)
@@ -1365,7 +1368,11 @@ class RequestHandler(BaseHTTPRequestHandler):
                     except Exception as e:
                         sys.stderr.write(f"[Session] Failed to save history: {e}\n")
                         sys.stderr.flush()
-                    maybe_generate_title(session_id, user_input)
+                    title_seed = user_input
+                    if isinstance(news_card, dict):
+                        news = news_card.get("news") if isinstance(news_card.get("news"), dict) else {}
+                        title_seed = (news.get("title") or "").strip() or user_input
+                    maybe_generate_title(session_id, title_seed)
                     
                 # debug_print("Sent [DONE] signal", file=sys.stderr)
                     
