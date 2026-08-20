@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
+import os from 'os'
 
 type Unsubscribe = () => void
 
@@ -259,6 +260,12 @@ const api = {
   getStockMoneyflow: (tsCode: string) => ipcRenderer.invoke('get-stock-moneyflow', tsCode),
   setTitleBarTheme: (theme: 'dark' | 'light') => ipcRenderer.invoke('set-title-bar-theme', theme),
   platform: process.platform,
+  windowBackdrop: (() => {
+    if (process.platform === 'darwin') return 'vibrancy' as const
+    if (process.platform !== 'win32') return 'none' as const
+    const build = Number(os.release().split('.')[2] || 0)
+    return Number.isFinite(build) && build >= 22000 ? ('mica' as const) : ('none' as const)
+  })(),
   getPendingUpdate: () => ipcRenderer.invoke('get-pending-update'),
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
   resizeUpdateToast: (height: number) => ipcRenderer.invoke('resize-update-toast', height),

@@ -484,6 +484,7 @@ declare interface Window {
     getStockMoneyflow: (tsCode: string) => Promise<MarketApiResult<StockMoneyflowRow[]>>
     setTitleBarTheme: (theme: 'dark' | 'light') => Promise<void>
     platform: string
+    windowBackdrop: 'mica' | 'vibrancy' | 'none'
     getPendingUpdate: () => Promise<UpdateInfo | null>
     checkForUpdates: () => Promise<UpdateCheckResult>
     resizeUpdateToast: (height: number) => Promise<{ success: boolean; height?: number }>

@@ -914,10 +914,10 @@ const ChatView: React.FC = () => {
 
 
   return (
-    <div className="fa-app-shell">
-      <div className="fa-app-shell-bg" aria-hidden />
-      {/* 整窗一层连续玻璃：侧栏 + 顶栏无接缝 */}
-      <div className="fa-chrome-glass" aria-hidden />
+    <div
+      className="fa-app-shell"
+      style={{ '--fa-sidebar-width': `${sidebarWidth}px` } as React.CSSProperties}
+    >
       <SessionTabs
         onOpenDrawer={() => setDrawerOpen(true)}
         width={sidebarWidth}
@@ -1045,7 +1045,10 @@ const ChatView: React.FC = () => {
         {showWelcomeHero ? (
           <div className="fa-hero no-drag">
             <div className="fa-hero-icon" aria-hidden>
-              <Sparkles size={28} strokeWidth={1.5} />
+              <span className="fa-hero-icon-mark">
+                <Sparkles size={28} strokeWidth={1.5} className="fa-hero-icon-base" />
+                <Sparkles size={28} strokeWidth={1.65} className="fa-hero-icon-shine" />
+              </span>
             </div>
             <h1 className="fa-hero-title">今天想分析什么？</h1>
             <p className="fa-hero-sub">

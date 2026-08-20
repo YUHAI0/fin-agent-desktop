@@ -9,9 +9,7 @@
 [data-theme='dark'] {
   --fa-bg: #0a0a0a;
   --fa-sidebar: #121212;
-  --fa-sidebar-glass: rgba(18, 18, 18, 0.88);
-  --fa-sidebar-glass-border: rgba(255, 255, 255, 0.06);
-  --fa-sidebar-glass-highlight: rgba(255, 255, 255, 0.07);
+  --fa-sidebar-glass-border: rgba(255, 255, 255, 0.08);
   --fa-sidebar-active: rgba(255, 255, 255, 0.09);
   --fa-sidebar-text: #f3f4f6;
   --fa-sidebar-muted: #c8c8c8;
@@ -20,14 +18,6 @@
   --fa-sidebar-active-text: #fef3c7;
   --fa-sidebar-hover-bg: rgba(255, 255, 255, 0.06);
   --fa-titlebar: #121212;
-  /* 仅纵向高光：侧栏与顶栏并排时不会在接缝处重新起色 */
-  --fa-glass-stack: linear-gradient(
-      180deg,
-      var(--fa-sidebar-glass-highlight) 0%,
-      rgba(255, 255, 255, 0.02) 28%,
-      transparent 55%
-    ),
-    var(--fa-sidebar-glass);
   --fa-main: #161616;
   --fa-surface: #252525;
   --fa-surface-hover: #2a2a2a;
@@ -80,9 +70,7 @@
 [data-theme='light'] {
   --fa-bg: #e8eaed;
   --fa-sidebar: #eceef1;
-  --fa-sidebar-glass: rgba(243, 244, 246, 0.72);
   --fa-sidebar-glass-border: rgba(9, 9, 11, 0.08);
-  --fa-sidebar-glass-highlight: rgba(255, 255, 255, 0.95);
   --fa-sidebar-active: #ffffff;
   --fa-sidebar-text: #18181b;
   --fa-sidebar-muted: #3f3f46;
@@ -91,13 +79,6 @@
   --fa-sidebar-active-text: #1d4ed8;
   --fa-sidebar-hover-bg: rgba(9, 9, 11, 0.05);
   --fa-titlebar: #eceef1;
-  --fa-glass-stack: linear-gradient(
-      180deg,
-      var(--fa-sidebar-glass-highlight) 0%,
-      rgba(255, 255, 255, 0.45) 28%,
-      transparent 55%
-    ),
-    var(--fa-sidebar-glass);
   --fa-main: #ffffff;
   --fa-surface: #ffffff;
   --fa-surface-hover: #f3f4f6;
@@ -137,6 +118,12 @@
   --fa-composer-shadow: 0 0 0 1px rgba(9, 9, 11, 0.08), 0 4px 24px rgba(9, 9, 11, 0.07);
 }
 
+html,
+body,
+#root {
+  height: 100%;
+}
+
 body {
   margin: 0;
   padding: 0;
@@ -147,6 +134,13 @@ body {
   line-height: 1.55;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
+}
+
+/* 系统材质（Windows Mica / macOS Vibrancy）：chrome 区必须透明 */
+html[data-window-backdrop]:not([data-window-backdrop='none']),
+html[data-window-backdrop]:not([data-window-backdrop='none']) body,
+html[data-window-backdrop]:not([data-window-backdrop='none']) #root {
+  background: transparent;
 }
 
 /* 全局细滚动条 */
@@ -420,53 +414,27 @@ body {
   .fa-app-shell {
     @apply relative flex h-screen overflow-hidden text-[var(--fa-text)];
     --fa-sidebar-width: 260px;
+    background: var(--fa-bg);
   }
 
-  .fa-app-shell-bg {
-    position: absolute;
-    inset: 0;
-    z-index: 0;
-    pointer-events: none;
-    background:
-      radial-gradient(ellipse 90% 55% at 8% -5%, rgba(245, 158, 11, 0.09), transparent 52%),
-      radial-gradient(ellipse 70% 45% at 92% 105%, rgba(99, 102, 241, 0.07), transparent 48%),
-      var(--fa-bg);
+  html[data-window-backdrop]:not([data-window-backdrop='none']) .fa-app-shell {
+    background: transparent;
   }
 
-  [data-theme='light'] .fa-app-shell-bg {
-    background:
-      radial-gradient(ellipse 90% 55% at 8% -5%, rgba(37, 99, 235, 0.07), transparent 52%),
-      radial-gradient(ellipse 70% 45% at 92% 105%, rgba(245, 158, 11, 0.05), transparent 48%),
-      var(--fa-bg);
-  }
-
-  /* 整窗连续玻璃层：侧栏与顶栏共享同一层，物理上无接缝 */
-  .fa-chrome-glass {
-    position: absolute;
-    inset: 0;
-    z-index: 0;
-    pointer-events: none;
-    background: var(--fa-glass-stack);
-    backdrop-filter: blur(28px) saturate(1.22);
-    -webkit-backdrop-filter: blur(28px) saturate(1.22);
-  }
-
-  .fa-glass-surface {
-    background: var(--fa-glass-stack);
-    backdrop-filter: blur(28px) saturate(1.22);
-    -webkit-backdrop-filter: blur(28px) saturate(1.22);
-  }
-
-  /* 侧栏：透明内容层，玻璃由 fa-chrome-glass 提供 */
+  /* 侧栏：无系统材质时实色；Mica / Vibrancy 下透明 */
   .fa-sidebar-glass {
     position: relative;
     z-index: 1;
     width: var(--fa-sidebar-width);
-    background: transparent;
+    background: var(--fa-sidebar);
     border-right: none;
     box-shadow: none;
     overflow: hidden;
     will-change: width;
+  }
+
+  html[data-window-backdrop]:not([data-window-backdrop='none']) .fa-sidebar-glass {
+    background: transparent;
   }
 
   .fa-sidebar-glass--animating {
@@ -478,6 +446,8 @@ body {
   }
 
   .fa-sidebar-inner {
+    position: relative;
+    z-index: 1;
     height: 100%;
     pointer-events: auto;
   }
@@ -529,13 +499,17 @@ body {
     background: color-mix(in srgb, var(--fa-accent) 55%, transparent);
   }
 
-  /* 顶栏：透明内容层，与侧栏共用同一层玻璃 */
+  /* 顶栏：无系统材质时实色；Mica / Vibrancy 下透明 */
   .fa-shell-toolbar {
     @apply relative flex shrink-0 items-center justify-end gap-0.5 pl-2 pr-3;
     min-height: var(--fa-titlebar-height);
-    background: transparent;
+    background: var(--fa-titlebar);
     border: none;
     box-shadow: none;
+  }
+
+  html[data-window-backdrop]:not([data-window-backdrop='none']) .fa-shell-toolbar {
+    background: transparent;
   }
 
   .fa-shell-main {
@@ -546,15 +520,14 @@ body {
   .fa-main-panel {
     @apply relative flex min-h-0 flex-1 flex-col overflow-hidden;
     background: var(--fa-main);
-    border-radius: var(--fa-radius-2xl) 0 0 0;
+    border-radius: 8px 0 0 0;
     margin: 0;
     border: none;
     box-shadow: none;
   }
 
-  [data-theme='light'] .fa-main-panel {
+  html[data-window-backdrop]:not([data-window-backdrop='none']) .fa-main-panel {
     border: none;
-    box-shadow: none;
   }
 
   [data-theme='light'] .fa-quick-chip {
@@ -592,15 +565,17 @@ body {
   .fa-sidebar-brand-pill {
     @apply flex min-w-0 max-w-full items-center gap-1 rounded-lg px-2.5 py-1 text-[13px] font-medium;
     color: var(--fa-sidebar-text);
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    background: var(--fa-sidebar-hover-bg);
+    border: 1px solid transparent;
   }
 
   [data-theme='light'] .fa-sidebar-brand-pill {
-    background: rgba(255, 255, 255, 0.92);
-    border: 1px solid rgba(9, 9, 11, 0.08);
-    box-shadow: 0 1px 2px rgba(9, 9, 11, 0.04);
+    background: rgba(255, 255, 255, 0.55);
+    border: 1px solid rgba(9, 9, 11, 0.06);
+  }
+
+  html[data-window-backdrop]:not([data-window-backdrop='none'])[data-theme='light'] .fa-sidebar-brand-pill {
+    background: rgba(255, 255, 255, 0.4);
   }
 
   .fa-sidebar-brand-pill-icon {
@@ -631,17 +606,17 @@ body {
   }
 
   .fa-shell-toolbar .fa-theme-toggle {
-    background: rgba(255, 255, 255, 0.06);
+    background: var(--fa-sidebar-hover-bg);
     border: 1px solid rgba(255, 255, 255, 0.08);
   }
 
   [data-theme='light'] .fa-shell-toolbar .fa-theme-toggle {
-    background: rgba(255, 255, 255, 0.75);
+    background: rgba(255, 255, 255, 0.55);
     border: 1px solid rgba(9, 9, 11, 0.08);
   }
 
-  .fa-shell-toolbar .fa-icon-btn:hover {
-    background: rgba(255, 255, 255, 0.08);
+  html[data-window-backdrop]:not([data-window-backdrop='none']) .fa-shell-toolbar .fa-icon-btn:hover {
+    background: var(--fa-sidebar-hover-bg);
   }
 
   [data-theme='light'] .fa-shell-toolbar .fa-icon-btn:hover {
@@ -752,6 +727,51 @@ body {
     background: var(--fa-surface);
     border: 1px solid var(--fa-border-subtle);
     color: var(--fa-muted);
+  }
+
+  .fa-hero-icon-mark {
+    position: relative;
+    display: block;
+    width: 28px;
+    height: 28px;
+  }
+
+  .fa-hero-icon-mark svg {
+    display: block;
+    overflow: visible;
+  }
+
+  .fa-hero-icon-shine {
+    position: absolute;
+    left: 0;
+    top: 0;
+    color: var(--fa-text);
+  }
+
+  .fa-hero-icon-shine :is(path, line, polyline, circle) {
+    stroke-dasharray: 12 96;
+    stroke-dashoffset: 0;
+    animation: fa-hero-icon-trace 2.6s linear infinite;
+  }
+
+  .fa-hero-icon-shine :is(path, line, polyline, circle):nth-child(2) {
+    animation-delay: 0.45s;
+  }
+
+  .fa-hero-icon-shine :is(path, line, polyline, circle):nth-child(3) {
+    animation-delay: 0.9s;
+  }
+
+  @keyframes fa-hero-icon-trace {
+    to {
+      stroke-dashoffset: -108;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .fa-hero-icon-shine {
+      display: none;
+    }
   }
 
   .fa-hero-title {
@@ -874,11 +894,23 @@ body {
     color: var(--fa-text);
   }
 
+  html[data-window-backdrop]:not([data-window-backdrop='none']) .fa-page {
+    background: transparent;
+  }
+
   /* 子页页头即标题栏：可拖拽，右侧为窗口控制按钮留位 */
   .fa-page-header {
     @apply flex h-12 shrink-0 items-center gap-3 px-4;
     background: var(--fa-main);
     -webkit-app-region: drag;
+  }
+
+  html[data-window-backdrop]:not([data-window-backdrop='none']) .fa-page-header {
+    background: transparent;
+  }
+
+  html[data-window-backdrop]:not([data-window-backdrop='none']) .fa-page > :not(.fa-page-header) {
+    background: var(--fa-main);
   }
 
   .fa-page-header button,

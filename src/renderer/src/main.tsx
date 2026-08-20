@@ -10,6 +10,9 @@ import { AppDialogProvider } from './contexts/AppDialogContext'
 if (window.api?.platform) {
   document.documentElement.dataset.platform = window.api.platform
 }
+if (window.api?.windowBackdrop) {
+  document.documentElement.dataset.windowBackdrop = window.api.windowBackdrop
+}
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <HashRouter>

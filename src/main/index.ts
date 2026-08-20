@@ -1,4 +1,12 @@
 import { app, BrowserWindow, globalShortcut, ipcMain, Tray, Menu, nativeImage, Notification, shell, screen } from 'electron'
+import {
+  applyNativeBackdrop,
+  applyNativeThemeSource,
+  attachBackdropPersistence,
+  currentWindowBackdrop,
+  disposeBackdropHelper,
+  nativeBackdropBrowserOptions
+} from './windowBackdrop'
 import { join, dirname } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { spawn, ChildProcess, exec, execSync } from 'child_process'
@@ -892,10 +900,10 @@ async function startPythonServer() {
 /** 与 renderer index.css --fa-titlebar-height 保持一致 */
 const TITLE_BAR_HEIGHT = 40
 
-/** 与连续玻璃 chrome 底色对齐，系统按钮区不突兀 */
+/** 系统标题栏按钮颜色；Mica / Vibrancy 下 overlay 必须透明，否则会盖住系统材质 */
 const TITLE_BAR_THEME = {
-  dark: { overlay: '#121212', background: '#0a0a0a', symbolColor: '#8e8e8e' },
-  light: { overlay: '#eceef1', background: '#e8eaed', symbolColor: '#52525b' }
+  dark: { overlay: '#121212', background: '#0a0a0a', symbolColor: '#c8c8c8' },
+  light: { overlay: '#eceef1', background: '#e8eaed', symbolColor: '#5c5c5c' }
 } as const
 
 function supportsTitleBarOverlay(): boolean {
@@ -905,6 +913,17 @@ function supportsTitleBarOverlay(): boolean {
 function applyTitleBarTheme(win: BrowserWindow | null, theme: keyof typeof TITLE_BAR_THEME = 'dark'): void {
   if (!win || win.isDestroyed() || !supportsTitleBarOverlay()) return
   const palette = TITLE_BAR_THEME[theme]
+  applyNativeThemeSource(theme)
+  const backdrop = currentWindowBackdrop()
+  if (backdrop !== 'none') {
+    applyNativeBackdrop(win)
+    win.setTitleBarOverlay({
+      color: '#00000000',
+      symbolColor: palette.symbolColor,
+      height: TITLE_BAR_HEIGHT
+    })
+    return
+  }
   win.setBackgroundColor(palette.background)
   win.setTitleBarOverlay({
     color: palette.overlay,
@@ -918,6 +937,8 @@ function createChatWindow(): void {
   const width = Math.min(1360, Math.max(1100, Math.floor(sw * 0.78)))
   const height = Math.min(900, Math.max(720, Math.floor(sh * 0.85)))
 
+  const backdrop = currentWindowBackdrop()
+  applyNativeThemeSource('dark')
   chatWindow = new BrowserWindow({
     width,
     height,
@@ -927,12 +948,13 @@ function createChatWindow(): void {
     show: false,
     autoHideMenuBar: true,
     title: 'Fin-Agent',
-    backgroundColor: TITLE_BAR_THEME.dark.background,
+    backgroundColor: backdrop !== 'none' ? '#00000000' : TITLE_BAR_THEME.dark.background,
+    ...nativeBackdropBrowserOptions(),
     ...(supportsTitleBarOverlay()
       ? {
           titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
           titleBarOverlay: {
-            color: TITLE_BAR_THEME.dark.overlay,
+            color: backdrop !== 'none' ? '#00000000' : TITLE_BAR_THEME.dark.overlay,
             symbolColor: TITLE_BAR_THEME.dark.symbolColor,
             height: TITLE_BAR_HEIGHT
           }
@@ -943,6 +965,11 @@ function createChatWindow(): void {
       sandbox: false
     }
   })
+  if (backdrop !== 'none') {
+    applyNativeBackdrop(chatWindow)
+    attachBackdropPersistence(chatWindow)
+    chatWindow.once('ready-to-show', () => applyNativeBackdrop(chatWindow))
+  }
 
   // 禁用 Alt 键显示菜单栏
   chatWindow.setMenuBarVisibility(false)
@@ -2846,6 +2873,7 @@ ipcMain.on('quit-confirmed', (_, confirmed: boolean) => {
 })
 
 app.on('will-quit', () => {
+  disposeBackdropHelper()
   killPythonProcess()
 })
 
