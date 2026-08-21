@@ -520,7 +520,7 @@ html[data-window-backdrop]:not([data-window-backdrop='none']) #root {
   .fa-main-panel {
     @apply relative flex min-h-0 flex-1 flex-col overflow-hidden;
     background: var(--fa-main);
-    border-radius: 8px 0 0 0;
+    border-radius: var(--fa-radius) 0 0 0;
     margin: 0;
     border: none;
     box-shadow: none;
@@ -716,6 +716,22 @@ html[data-window-backdrop]:not([data-window-backdrop='none']) #root {
     to {
       transform: rotate(360deg);
     }
+  }
+
+  .fa-dashboard-welcome {
+    @apply min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-8;
+  }
+
+  .fa-dashboard-welcome-inner {
+    @apply mx-auto flex w-full max-w-3xl flex-col gap-4 pb-28;
+  }
+
+  .fa-dashboard-metrics {
+    @apply grid grid-cols-3 gap-3;
+  }
+
+  .fa-dashboard-actions {
+    @apply grid grid-cols-1 gap-2 sm:grid-cols-3;
   }
 
   .fa-hero {
@@ -926,6 +942,61 @@ html[data-window-backdrop]:not([data-window-backdrop='none']) #root {
 
   [data-platform='darwin'] .fa-page-header {
     padding-left: 76px;
+  }
+
+  .fa-onboarding-progress {
+    @apply mx-auto mb-8 flex max-w-md gap-1.5;
+  }
+
+  .fa-onboarding-progress span {
+    @apply h-1 flex-1 rounded-full;
+    background: var(--fa-border-subtle);
+  }
+
+  .fa-onboarding-progress span[data-done='true'] {
+    background: var(--fa-accent);
+  }
+
+  .fa-onboarding-choices {
+    @apply flex flex-col gap-2;
+  }
+
+  .fa-onboarding-choice {
+    @apply w-full cursor-pointer rounded-xl px-4 py-3 text-left text-sm font-medium;
+    border: 1px solid var(--fa-border);
+    background: var(--fa-surface);
+    color: var(--fa-text);
+  }
+
+  .fa-onboarding-choice[data-active='true'] {
+    border-color: var(--fa-accent);
+    background: var(--fa-accent-soft);
+    color: var(--fa-sidebar-active-text);
+  }
+
+  html[data-theme='light'] .fa-onboarding-choice[data-active='true'] {
+    color: var(--fa-text);
+  }
+
+  .fa-onboarding-chips {
+    @apply flex flex-wrap gap-2;
+  }
+
+  .fa-onboarding-chip {
+    @apply cursor-pointer rounded-full px-3 py-1.5 text-sm;
+    border: 1px solid var(--fa-border);
+    background: transparent;
+    color: var(--fa-muted);
+  }
+
+  .fa-onboarding-chip[data-active='true'] {
+    border-color: var(--fa-accent);
+    background: var(--fa-accent-soft);
+    color: var(--fa-text);
+  }
+
+  .fa-onboarding-footer {
+    @apply mt-10 flex items-center justify-between gap-3;
   }
 
   .fa-label {

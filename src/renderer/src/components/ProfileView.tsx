@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
 import { useAppDialog } from '../contexts/AppDialogContext'
+import { CAPITAL_RANGE_OPTIONS, parseSectorList, type CapitalRange } from '../utils/profileFields'
 import FaSelect from './FaSelect'
 import SubPageShell from './SubPageShell'
 
@@ -44,19 +45,13 @@ function joinSectors(sectors: unknown): string {
   return Array.isArray(sectors) ? sectors.filter((s) => typeof s === 'string' && s.trim()).join('，') : ''
 }
 
-function parseSectors(raw: string): string[] {
-  return raw
-    .split(/[,，、]/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-}
-
 const ProfileView: React.FC = () => {
   const navigate = useNavigate()
   const { alert } = useAppDialog()
   const [experienceLevel, setExperienceLevel] = useState<ExperienceLevel>('Unknown')
   const [riskTolerance, setRiskTolerance] = useState<RiskTolerance>('Unknown')
   const [investmentHorizon, setInvestmentHorizon] = useState<InvestmentHorizon>('Unknown')
+  const [capitalRange, setCapitalRange] = useState<CapitalRange | ''>('')
   const [favoriteSectors, setFavoriteSectors] = useState('')
   const [avoidSectors, setAvoidSectors] = useState('')
   const [investmentStyle, setInvestmentStyle] = useState('')
@@ -70,6 +65,10 @@ const ProfileView: React.FC = () => {
       setExperienceLevel(pickEnum(profile.experience_level, EXPERIENCE_OPTIONS, 'Unknown'))
       setRiskTolerance(pickEnum(profile.risk_tolerance, RISK_OPTIONS, 'Unknown'))
       setInvestmentHorizon(pickEnum(profile.investment_horizon, HORIZON_OPTIONS, 'Unknown'))
+      const capital = profile.capital_range
+      setCapitalRange(
+        CAPITAL_RANGE_OPTIONS.some((o) => o.value === capital) ? (capital as CapitalRange) : ''
+      )
       setFavoriteSectors(joinSectors(profile.favorite_sectors))
       setAvoidSectors(joinSectors(profile.avoid_sectors))
       setInvestmentStyle(profile.investment_style || '')
@@ -115,8 +114,9 @@ const ProfileView: React.FC = () => {
         experience_level: experienceLevel,
         risk_tolerance: riskTolerance,
         investment_horizon: investmentHorizon,
-        favorite_sectors: parseSectors(favoriteSectors),
-        avoid_sectors: parseSectors(avoidSectors)
+        capital_range: capitalRange === '' ? null : capitalRange,
+        favorite_sectors: parseSectorList(favoriteSectors),
+        avoid_sectors: parseSectorList(avoidSectors)
       }
       const style = investmentStyle.trim()
       if (style) {
@@ -210,6 +210,16 @@ const ProfileView: React.FC = () => {
                 aria-label="投资周期"
                 onChange={(v) => setInvestmentHorizon(v as InvestmentHorizon)}
                 options={HORIZON_OPTIONS}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="fa-label">可投资金额</label>
+              <FaSelect
+                value={capitalRange}
+                aria-label="可投资金额"
+                onChange={(v) => setCapitalRange(v as CapitalRange | '')}
+                options={[{ value: '', label: '未设置' }, ...CAPITAL_RANGE_OPTIONS]}
               />
             </div>
 

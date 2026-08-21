@@ -15,6 +15,7 @@ import * as http from 'http'
 import * as https from 'https'
 import { promisify, format } from 'util'
 import { getUpdateDownloadCandidates, initUpdateMirror } from './updateMirror'
+import { markOnboardingStatus, resolveStartupHash } from './onboarding'
 
 const execPromise = promisify(exec)
 
@@ -980,10 +981,11 @@ function createChatWindow(): void {
     chatWindow?.hide()
   })
 
+  const startupHash = resolveStartupHash()
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    chatWindow.loadURL(`${process.env['ELECTRON_RENDERER_URL']}/#/chat`)
+    chatWindow.loadURL(`${process.env['ELECTRON_RENDERER_URL']}/#/${startupHash}`)
   } else {
-    chatWindow.loadFile(join(__dirname, '../renderer/index.html'), { hash: 'chat' })
+    chatWindow.loadFile(join(__dirname, '../renderer/index.html'), { hash: startupHash })
   }
 }
 
@@ -1909,6 +1911,15 @@ app.whenReady().then(() => {
     return await makeApiRequest('/profile', 'POST', data)
   })
 
+  ipcMain.handle('skip-onboarding', () => {
+    markOnboardingStatus('skipped')
+    return { success: true }
+  })
+  ipcMain.handle('complete-onboarding', () => {
+    markOnboardingStatus('completed')
+    return { success: true }
+  })
+
   ipcMain.handle('open-external', async (_, url: string) => {
     const target = typeof url === 'string' ? url.trim() : ''
     if (!target) {
@@ -2607,6 +2618,19 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle('list-portfolios', async () => makeApiRequest('/portfolio/list'))
+
+  ipcMain.handle('get-dashboard-summary', async (_e, portfolioId?: string) => {
+    const q = portfolioId ? `?portfolio_id=${encodeURIComponent(portfolioId)}` : ''
+    return makeApiRequest(`/dashboard/summary${q}`)
+  })
+
+  ipcMain.handle('set-active-portfolio', async (_e, id: string) =>
+    makeApiRequest('/portfolio/active', 'POST', { id })
+  )
+
+  ipcMain.handle('generate-dashboard-comment', async (_e, payload: unknown) =>
+    makeApiRequest('/dashboard/comment', 'POST', payload)
+  )
 
   ipcMain.handle('get-portfolio-detail', async (_e, id?: string) =>
     makeApiRequest(`/portfolio/detail${id ? `?id=${encodeURIComponent(id)}` : ''}`)

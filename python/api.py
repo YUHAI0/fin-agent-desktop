@@ -484,6 +484,9 @@ def handle_profile_save(req):
     pm = get_profile_manager()
     body = req.body or {}
     try:
+        kwargs = {}
+        if "capital_range" in body:
+            kwargs["capital_range"] = body.get("capital_range")
         pm.update_profile(
             risk_tolerance=body.get("risk_tolerance"),
             investment_horizon=body.get("investment_horizon"),
@@ -491,6 +494,7 @@ def handle_profile_save(req):
             avoid_sectors=body.get("avoid_sectors"),
             investment_style=body.get("investment_style"),
             experience_level=body.get("experience_level"),
+            **kwargs,
         )
     except ValueError as e:
         return {"success": False, "error": str(e)}
@@ -1049,6 +1053,36 @@ def _portfolio_result(message):
 @route("GET", "/portfolio/list")
 def handle_portfolio_list(req):
     return PortfolioManager().list_portfolios()
+
+
+@route("POST", "/portfolio/active")
+def handle_portfolio_active(req):
+    pid = (req.body or {}).get("id")
+    try:
+        PortfolioManager().set_active_portfolio(pid)
+    except ValueError as e:
+        return {"ok": False, "error": str(e) or "组合不存在"}
+    listed = PortfolioManager().list_portfolios()
+    return {"ok": True, "active_portfolio_id": listed.get("active_portfolio_id")}
+
+
+@route("GET", "/dashboard/summary")
+def handle_dashboard_summary(req):
+    from fin_agent.dashboard import build_dashboard_summary
+
+    return build_dashboard_summary(req.query.get("portfolio_id") or None)
+
+
+@route("POST", "/dashboard/comment")
+def handle_dashboard_comment(req):
+    from fin_agent.dashboard import generate_dashboard_comment
+
+    body = req.body or {}
+    return generate_dashboard_comment(
+        body.get("portfolio_id"),
+        body.get("index"),
+        body.get("news_titles"),
+    )
 
 
 @route("GET", "/portfolio/detail")

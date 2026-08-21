@@ -413,10 +413,15 @@ class PortfolioManager:
 
         def fetch():
             df = get_provider().get_realtime_price(ts_codes)
-            return {
-                row["ts_code"]: {"price": float(row["price"] or 0), "name": row.get("name")}
-                for _, row in df.iterrows()
-            }
+            out = {}
+            for _, row in df.iterrows():
+                pre = row["pre_close"] if "pre_close" in row.index else 0
+                out[row["ts_code"]] = {
+                    "price": float(row["price"] or 0),
+                    "pre_close": float(pre or 0),
+                    "name": row.get("name"),
+                }
+            return out
 
         with ThreadPoolExecutor(max_workers=1) as ex:
             future = ex.submit(fetch)

@@ -3,6 +3,27 @@ import os
 from typing import Dict, Any, Optional
 from fin_agent.config import Config
 
+CAPITAL_RANGES = {
+    "under_5w",
+    "5_20w",
+    "20_50w",
+    "50_100w",
+    "over_100w",
+    "undisclosed",
+}
+
+CAPITAL_RANGE_LABELS = {
+    "under_5w": "5万以下",
+    "5_20w": "5–20万",
+    "20_50w": "20–50万",
+    "50_100w": "50–100万",
+    "over_100w": "100万以上",
+    "undisclosed": "暂不透露",
+}
+
+_UNSET = object()
+UNSET = _UNSET
+
 
 class UserProfileManager:
     def __init__(self, file_path: str = None):
@@ -56,6 +77,7 @@ class UserProfileManager:
         avoid_sectors: Optional[list] = None,
         investment_style: Optional[str] = None,
         experience_level: Optional[str] = None,
+        capital_range=_UNSET,
         **kwargs
     ):
         """
@@ -80,6 +102,14 @@ class UserProfileManager:
             self.profile["investment_style"] = investment_style
         if experience_level is not None:
             self.profile["experience_level"] = experience_level
+
+        if capital_range is not _UNSET:
+            if capital_range in (None, ""):
+                self.profile.pop("capital_range", None)
+            else:
+                if capital_range not in CAPITAL_RANGES:
+                    raise ValueError("capital_range 无效")
+                self.profile["capital_range"] = capital_range
 
         # Update custom preferences
         if kwargs:
@@ -140,6 +170,14 @@ class UserProfileManager:
         favorites = p.get("favorite_sectors") or []
         avoids = p.get("avoid_sectors") or []
 
+        capital = p.get("capital_range")
+        if not capital:
+            capital_label = "未指定"
+        elif capital in CAPITAL_RANGE_LABELS:
+            capital_label = CAPITAL_RANGE_LABELS[capital]
+        else:
+            capital_label = str(capital)
+
         summary = f"""用户画像：
 - 经验等级：{level_label}
 - 风险偏好：{risk_map.get(risk, risk)}
@@ -147,6 +185,7 @@ class UserProfileManager:
 - 关注板块：{', '.join(favorites) if favorites else '未指定'}
 - 回避板块：{', '.join(avoids) if avoids else '未指定'}
 - 投资风格：{p.get('investment_style') or '未指定'}
+- 可投资金额：{capital_label}
 - 表达要求：{style_hint}"""
         custom = p.get("custom_preferences") or {}
         if custom:

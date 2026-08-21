@@ -11,6 +11,27 @@ export function buildPortfolioDiagnosePrefill(portfolioId: string, portfolioName
   return `请诊断当前组合${label}（id=${portfolioId}）：按结论→依据→风险→下一步给出健康度与调仓建议；先调用持仓工具获取真实数据。`
 }
 
+export function buildWatchTodayPrefill(input: {
+  portfolioName?: string
+  indexName?: string
+  changePct?: number | null
+  newsTitles?: string[]
+}): string {
+  const name = input.portfolioName || '当前组合'
+  let indexLine = '大盘数据暂缺'
+  if (input.indexName && input.changePct != null && Number.isFinite(input.changePct)) {
+    const n = input.changePct
+    indexLine = `${input.indexName} ${n > 0 ? '+' : ''}${n.toFixed(2)}%`
+  }
+  const news = (input.newsTitles || []).filter(Boolean).slice(0, 3)
+  const newsLine = news.length ? news.map((t, i) => `${i + 1}. ${t}`).join('；') : '暂无新闻'
+  return (
+    `请根据今天的市场与资讯，告诉我「今日该关注什么」。` +
+    `组合：${name}。大盘：${indexLine}。新闻：${newsLine}。` +
+    `按结论→依据→风险→下一步回答，不要编造未提供的数据。`
+  )
+}
+
 export function buildNewsImpactPrefill(title: string, body: string, relatedCodes: string[] = []): string {
   const codes = relatedCodes.length ? `相关标的：${relatedCodes.join('、')}。` : ''
   return `请分析以下新闻对我当前持仓的影响（结论→依据→风险→下一步）。${codes}\n标题：${title}\n内容：${body.slice(0, 800)}`

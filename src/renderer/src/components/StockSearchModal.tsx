@@ -5,11 +5,12 @@ import { Loader2, Search, X } from 'lucide-react'
 export interface StockSearchModalProps {
   open: boolean
   onClose: () => void
+  onPick?: (item: StockSearchItem) => void
 }
 
 const DEBOUNCE_MS = 280
 
-export const StockSearchModal: React.FC<StockSearchModalProps> = ({ open, onClose }) => {
+export const StockSearchModal: React.FC<StockSearchModalProps> = ({ open, onClose, onPick }) => {
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
@@ -64,9 +65,13 @@ export const StockSearchModal: React.FC<StockSearchModalProps> = ({ open, onClos
 
   if (!open) return null
 
-  const openStock = (tsCode: string) => {
+  const openStock = (item: StockSearchItem) => {
     onClose()
-    navigate(`/stock/${encodeURIComponent(tsCode)}`)
+    if (onPick) {
+      onPick(item)
+      return
+    }
+    navigate(`/stock/${encodeURIComponent(item.ts_code)}`)
   }
 
   return (
@@ -130,7 +135,7 @@ export const StockSearchModal: React.FC<StockSearchModalProps> = ({ open, onClos
               <button
                 key={item.ts_code}
                 type="button"
-                onClick={() => openStock(item.ts_code)}
+                onClick={() => openStock(item)}
                 className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-[var(--fa-surface-hover)]"
               >
                 <div className="min-w-0 flex-1">

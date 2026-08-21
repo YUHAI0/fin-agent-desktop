@@ -3,13 +3,14 @@ import { flushSync } from 'react-dom'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Settings, ChevronDown, ChevronRight, Check, Loader2, Terminal, Bell, Briefcase, Newspaper, ArrowUp, Square, Brain, Sun, Moon, Sparkles, Search, PanelLeft, CircleUser } from 'lucide-react'
+import { Settings, ChevronDown, ChevronRight, Check, Loader2, Terminal, Bell, Briefcase, Newspaper, ArrowUp, Square, Brain, Sun, Moon, Search, PanelLeft, CircleUser } from 'lucide-react'
 import { useChat, ChatBlock, Message } from '../contexts/ChatContext'
 import { useTheme } from '../contexts/ThemeContext'
 import { KlinePanel } from './KlinePanel'
 import { BacktestEquityPanel } from './BacktestEquityPanel'
 import { ReminderTasksModal } from './ReminderTasksModal'
 import StockSearchModal from './StockSearchModal'
+import DashboardWelcome from './DashboardWelcome'
 import SessionTabs, {
   SIDEBAR_DEFAULT_WIDTH,
   SIDEBAR_MAX_WIDTH,
@@ -19,7 +20,7 @@ import HistoryDrawer from './HistoryDrawer'
 import { parseToolResultToKline } from '../utils/parseToolOhlc'
 import { parseRunBacktestEquity } from '../utils/parseToolBacktest'
 import { getQuickReplyOptions, stripFinAgentChoicesForDisplay } from '../utils/extractReplyQuickOptions'
-import { getDefaultQuickReplyOptions, normalizeSessionMessages } from '../utils/welcomeAgentMessage'
+import { normalizeSessionMessages } from '../utils/welcomeAgentMessage'
 import { parseMaLadder } from '../utils/parseMaLadder'
 import { MaLadderPanel } from './MaLadderPanel'
 import { toolDisplayName } from '../utils/toolDisplayName'
@@ -330,7 +331,7 @@ const ChatView: React.FC = () => {
 
   const quickReplyOptions = useMemo(() => {
     if (isResponding || isTyping) return []
-    if (showWelcomeHero) return getDefaultQuickReplyOptions()
+    if (showWelcomeHero) return []
     return getQuickReplyOptions(messages, isResponding, isTyping)
   }, [messages, isResponding, isTyping, showWelcomeHero])
 
@@ -1043,18 +1044,7 @@ const ChatView: React.FC = () => {
 
         {/* 空状态 hero 或消息流 */}
         {showWelcomeHero ? (
-          <div className="fa-hero no-drag">
-            <div className="fa-hero-icon" aria-hidden>
-              <span className="fa-hero-icon-mark">
-                <Sparkles size={28} strokeWidth={1.5} className="fa-hero-icon-base" />
-                <Sparkles size={28} strokeWidth={1.65} className="fa-hero-icon-shine" />
-              </span>
-            </div>
-            <h1 className="fa-hero-title">今天想分析什么？</h1>
-            <p className="fa-hero-sub">
-              行情、财务、选股、回测与持仓提醒 — 直接输入，或点下方快捷语句开始
-            </p>
-          </div>
+          <DashboardWelcome onOpenReminders={() => setReminderModalOpen(true)} />
         ) : (
           <div
             ref={scrollContainerRef}

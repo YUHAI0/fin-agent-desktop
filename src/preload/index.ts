@@ -155,6 +155,8 @@ const api = {
     ipcRenderer.invoke('list-local-models', payload),
   getProfile: () => ipcRenderer.invoke('get-profile'),
   saveProfile: (data: object) => ipcRenderer.invoke('save-profile', data),
+  skipOnboarding: () => ipcRenderer.invoke('skip-onboarding'),
+  completeOnboarding: () => ipcRenderer.invoke('complete-onboarding'),
   openSettings: () => ipcRenderer.send('open-settings'),
   resetConversationContext: () => ipcRenderer.send('reset-conversation-context'),
   openExternal: async (url: string): Promise<{ success: boolean; error?: string }> => {
@@ -244,6 +246,11 @@ const api = {
   searchSessions: (keyword: string) => ipcRenderer.invoke('search-sessions', keyword),
   saveSessionUi: (id: string, uiMessages: unknown[]) => ipcRenderer.invoke('save-session-ui', id, uiMessages),
   listPortfolios: () => ipcRenderer.invoke('list-portfolios'),
+  getDashboardSummary: (portfolioId?: string) =>
+    ipcRenderer.invoke('get-dashboard-summary', portfolioId),
+  setActivePortfolio: (id: string) => ipcRenderer.invoke('set-active-portfolio', id),
+  generateDashboardComment: (payload: object) =>
+    ipcRenderer.invoke('generate-dashboard-comment', payload),
   getPortfolioDetail: (id?: string) => ipcRenderer.invoke('get-portfolio-detail', id),
   createPortfolio: (name: string) => ipcRenderer.invoke('create-portfolio', name),
   renamePortfolio: (id: string, name: string) => ipcRenderer.invoke('rename-portfolio', id, name),

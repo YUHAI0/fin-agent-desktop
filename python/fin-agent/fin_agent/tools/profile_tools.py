@@ -1,5 +1,5 @@
 import json
-from fin_agent.user_profile import UserProfileManager
+from fin_agent.user_profile import UserProfileManager, UNSET
 
 # Global instance - lazy init to avoid startup crashes
 _profile_manager = None
@@ -10,17 +10,29 @@ def get_profile_manager():
         _profile_manager = UserProfileManager()
     return _profile_manager
 
-def update_user_profile(risk_tolerance=None, investment_horizon=None, favorite_sectors=None, avoid_sectors=None, investment_style=None, experience_level=None):
+def update_user_profile(
+    risk_tolerance=None,
+    investment_horizon=None,
+    favorite_sectors=None,
+    avoid_sectors=None,
+    investment_style=None,
+    experience_level=None,
+    capital_range=UNSET,
+):
     """
     Update the user's investment profile and preferences.
     """
+    kwargs = {}
+    if capital_range is not UNSET:
+        kwargs["capital_range"] = capital_range
     return get_profile_manager().update_profile(
         risk_tolerance=risk_tolerance,
         investment_horizon=investment_horizon,
         favorite_sectors=favorite_sectors,
         avoid_sectors=avoid_sectors,
         investment_style=investment_style,
-        experience_level=experience_level
+        experience_level=experience_level,
+        **kwargs,
     )
 
 def get_user_profile():
@@ -67,7 +79,19 @@ PROFILE_TOOLS_SCHEMA = [
                         "type": "string",
                         "enum": ["beginner", "experienced", "Unknown"],
                         "description": "User's investing experience: beginner, experienced, or Unknown."
-                    }
+                    },
+                    "capital_range": {
+                        "type": "string",
+                        "enum": [
+                            "under_5w",
+                            "5_20w",
+                            "20_50w",
+                            "50_100w",
+                            "over_100w",
+                            "undisclosed",
+                        ],
+                        "description": "Investable capital range bucket. Omit to leave unchanged.",
+                    },
                 },
                 "required": []
             }

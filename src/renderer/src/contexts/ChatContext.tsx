@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import type { NewsCardPayload } from '../utils/chatPrefill'
 import { normalizeSessionMessages } from '../utils/welcomeAgentMessage'
 
@@ -117,6 +117,7 @@ const NEWS_CARD_SEND_EVENT = 'fa-news-card-send'
 
 export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const navigate = useNavigate()
+  const location = useLocation()
   const [messagesBySession, setMessagesBySession] = useState<Record<string, Message[]>>({})
   const [openTabs, setOpenTabs] = useState<SessionMeta[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
@@ -424,7 +425,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   }
 
-  if (!ready) {
+  if (!ready && location.pathname !== '/onboarding') {
     return <div className="h-screen w-screen bg-[var(--fa-bg,#0c0c0e)]" aria-busy="true" />
   }
 

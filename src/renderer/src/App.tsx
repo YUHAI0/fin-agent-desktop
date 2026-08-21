@@ -1,6 +1,7 @@
 import { Routes, Route, useNavigate } from 'react-router-dom'
 import InputView from './components/InputView'
 import ChatView from './components/ChatView'
+import OnboardingView from './components/OnboardingView'
 import ConfigView from './components/ConfigView'
 import ProfileView from './components/ProfileView'
 import AboutView from './components/AboutView'
@@ -64,6 +65,7 @@ function App(): JSX.Element {
       <Routes>
         <Route path="/input" element={<InputView />} />
         <Route path="/chat" element={<ChatView />} />
+        <Route path="/onboarding" element={<OnboardingView />} />
         <Route path="/config" element={<ConfigView />} />
         <Route path="/profile" element={<ProfileView />} />
         <Route path="/about" element={<AboutView />} />

@@ -12,6 +12,7 @@ interface UserProfile {
   investment_style: string
   experience_level: 'beginner' | 'experienced' | 'Unknown'
   custom_preferences: Record<string, unknown>
+  capital_range?: 'under_5w' | '5_20w' | '20_50w' | '50_100w' | 'over_100w' | 'undisclosed'
 }
 
 interface ProfileCompleteness {
@@ -111,6 +112,50 @@ interface PortfolioDetail {
   total_pnl: number
   total_pnl_pct: number
   breakdown?: PortfolioBreakdown
+}
+
+interface DashboardIndex {
+  ts_code: string
+  name: string
+  price: number
+  change_pct: number
+}
+
+interface DashboardNewsItem {
+  id: string
+  title: string
+  source: string
+  url: string
+  match: 'holding' | 'sector' | 'market'
+}
+
+interface DashboardAlertItem {
+  id: string
+  message: string
+  triggered_at: number
+}
+
+interface DashboardSnapshot {
+  portfolio_id: string
+  portfolio_name: string
+  has_positions: boolean
+  total_market_value: number | null
+  today_pnl: number | null
+  today_pnl_pct: number | null
+  total_pnl: number | null
+  total_pnl_pct: number | null
+}
+
+interface DashboardSummary {
+  ok: boolean
+  portfolios: PortfolioMeta[]
+  active_portfolio_id: string
+  snapshot: DashboardSnapshot
+  index: DashboardIndex | null
+  news_source: 'holding' | 'sector' | 'market'
+  news: DashboardNewsItem[]
+  alerts: DashboardAlertItem[]
+  error?: string
 }
 
 interface AlertHistoryItem {
@@ -385,6 +430,8 @@ declare interface Window {
       completeness?: ProfileCompleteness
       error?: string
     }>
+    skipOnboarding: () => Promise<{ success: boolean }>
+    completeOnboarding: () => Promise<{ success: boolean }>
     openSettings: () => void
     resetConversationContext: () => void
     openExternal: (url: string) => Promise<{ success: boolean; error?: string }>
@@ -469,6 +516,13 @@ declare interface Window {
     searchSessions: (keyword: string) => Promise<{ sessions: SessionMeta[]; truncated: boolean }>
     saveSessionUi: (id: string, uiMessages: unknown[]) => Promise<{ success: boolean }>
     listPortfolios: () => Promise<{ active_portfolio_id: string; portfolios: PortfolioMeta[] }>
+    getDashboardSummary: (portfolioId?: string) => Promise<DashboardSummary>
+    setActivePortfolio: (id: string) => Promise<{ ok: boolean; active_portfolio_id?: string; error?: string }>
+    generateDashboardComment: (payload: {
+      portfolio_id?: string
+      index?: { name?: string; change_pct?: number | null }
+      news_titles?: string[]
+    }) => Promise<{ ok: boolean; comment?: string; error?: string }>
     getPortfolioDetail: (id?: string) => Promise<PortfolioDetail>
     createPortfolio: (name: string) => Promise<{ success: boolean; id?: string; error?: string }>
     renamePortfolio: (id: string, name: string) => Promise<{ success: boolean; error?: string }>
