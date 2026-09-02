@@ -115,9 +115,18 @@ export default function ToastView(): JSX.Element {
   }, [])
 
   const isNews = payload?.type === 'news' || !!payload?.news_id || !!payload?.merged
-  const isPriceAlert = payload?.type === 'price_alert'
+  const isWatchlistMove = payload?.type === 'watchlist_move'
+  const isPriceAlert = payload?.type === 'price_alert' || isWatchlistMove
   const isAppUpdate = payload?.type === 'app_update'
-  const tagLabel = isPriceAlert ? '价格提醒' : isAppUpdate ? '更新' : isNews ? '新闻' : ''
+  const tagLabel = isWatchlistMove
+    ? '自选异动'
+    : payload?.type === 'price_alert'
+      ? '价格提醒'
+      : isAppUpdate
+        ? '更新'
+        : isNews
+          ? '新闻'
+          : ''
 
   // 按内容高度自适应窗口，避免固定高度留白
   useLayoutEffect(() => {

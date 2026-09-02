@@ -53,6 +53,9 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   remove_portfolio_position: '移除持仓',
   get_portfolio_status: '查询持仓',
   clear_portfolio: '清空持仓',
+  add_watchlist: '加入自选',
+  list_watchlist: '查看自选',
+  remove_watchlist: '移出自选',
   update_user_profile: '更新用户画像',
   get_user_profile: '查询用户画像'
 }

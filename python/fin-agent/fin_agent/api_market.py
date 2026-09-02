@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from math import isnan
+import re
 
 from fin_agent.config import Config
 from fin_agent.datasources import CapabilityNotSupported, get_provider
@@ -76,56 +77,104 @@ def _looks_like_code(q: str) -> bool:
     return len(digits) >= 4
 
 
+_TX_SUGGEST_URL = "https://smartbox.gtimg.cn/s3/"
+_TX_SUGGEST_HEADERS = {
+    "User-Agent": "Mozilla/5.0",
+    "Referer": "https://gu.qq.com/",
+}
+_TX_HINT_RE = re.compile(r'v_hint="(.*)"', re.S)
+_TX_STOCK_KINDS = {"GP-A", "GP-B"}
+
+
+def _decode_tencent_hint(payload: str) -> str:
+    if "\\u" not in payload:
+        return payload
+    try:
+        return payload.encode("utf-8").decode("unicode_escape")
+    except Exception:
+        return payload
+
+
+def _search_tencent_suggest(query: str, limit: int):
+    """腾讯股票联想（网页搜索同款），按关键字即时返回，不拉全市场列表。"""
+    import requests
+
+    resp = requests.get(
+        _TX_SUGGEST_URL,
+        params={"v": "2", "q": query, "t": "all"},
+        headers=_TX_SUGGEST_HEADERS,
+        timeout=3,
+    )
+    resp.raise_for_status()
+    matched = _TX_HINT_RE.search(resp.text or "")
+    raw = matched.group(1) if matched else ""
+    if not raw or raw == "N":
+        return []
+    raw = _decode_tencent_hint(raw)
+    out = []
+    seen = set()
+    for item in raw.split("^"):
+        parts = item.split("~")
+        if len(parts) < 3:
+            continue
+        _market, code, name = parts[0], parts[1], parts[2]
+        kind = parts[4] if len(parts) > 4 else ""
+        if kind and kind not in _TX_STOCK_KINDS:
+            continue
+        try:
+            ts_code = to_ts_code(code)
+        except ValueError:
+            continue
+        if ts_code in seen:
+            continue
+        seen.add(ts_code)
+        out.append({
+            "ts_code": ts_code,
+            "symbol": to_plain_code(ts_code),
+            "name": (name or "").strip() or None,
+            "industry": None,
+            "market": None,
+        })
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _search_by_exact_code(query: str, limit: int):
+    provider = get_provider()
+    try:
+        code = to_ts_code(query)
+    except ValueError:
+        return []
+    df = provider.get_stock_basic(ts_code=code)
+    rows = df_records(df, limit=limit)
+    return [
+        {
+            "ts_code": r.get("ts_code"),
+            "symbol": r.get("symbol") or (to_plain_code(r["ts_code"]) if r.get("ts_code") else None),
+            "name": r.get("name"),
+            "industry": r.get("industry"),
+            "market": r.get("market"),
+        }
+        for r in rows
+        if r.get("ts_code")
+    ]
+
+
 def search_stocks(q: str, limit: int = SEARCH_LIMIT):
     query = (q or "").strip()
     if not query:
         return ok([])
-    provider = get_provider()
     try:
+        try:
+            items = _search_tencent_suggest(query, limit)
+        except Exception:
+            items = []
+        if items:
+            return ok(items)
         if _looks_like_code(query):
-            try:
-                code = to_ts_code(query)
-                df = provider.get_stock_basic(ts_code=code)
-            except ValueError:
-                df = provider.get_stock_basic(name=query)
-        else:
-            df = provider.get_stock_basic(name=query)
-            if (df is None or len(df) == 0) and provider.name == "tushare":
-                # Tushare name 多为精确匹配；名称模糊时回退 A 股代码表本地过滤
-                try:
-                    import akshare as ak
-
-                    full = ak.stock_info_a_code_name()
-                    full = full.rename(columns={"code": "symbol", "name": "name"})
-                    mask = full["name"].astype(str).str.contains(query, case=False, na=False)
-                    mask = mask | full["symbol"].astype(str).str.contains(query, case=False, na=False)
-                    hit = full[mask].head(limit).copy()
-                    if len(hit):
-                        hit["ts_code"] = hit["symbol"].apply(lambda c: to_ts_code(str(c)))
-                        df = hit
-                except Exception:
-                    pass
-            if df is not None and len(df) and "name" in df.columns:
-                mask = df["name"].astype(str).str.contains(query, case=False, na=False)
-                if "ts_code" in df.columns:
-                    mask = mask | df["ts_code"].astype(str).str.contains(query, case=False, na=False)
-                if "symbol" in df.columns:
-                    mask = mask | df["symbol"].astype(str).str.contains(query, case=False, na=False)
-                filtered = df[mask]
-                if len(filtered):
-                    df = filtered
-        rows = df_records(df, limit=limit)
-        return ok([
-            {
-                "ts_code": r.get("ts_code"),
-                "symbol": r.get("symbol") or (to_plain_code(r["ts_code"]) if r.get("ts_code") else None),
-                "name": r.get("name"),
-                "industry": r.get("industry"),
-                "market": r.get("market"),
-            }
-            for r in rows
-            if r.get("ts_code")
-        ])
+            return ok(_search_by_exact_code(query, limit))
+        return ok([])
     except CapabilityNotSupported as e:
         return fail(str(e), "unsupported")
     except Exception as e:

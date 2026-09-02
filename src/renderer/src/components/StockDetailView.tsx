@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Loader2, RefreshCw, Sparkles } from 'lucide-react'
+import { ArrowLeft, Bookmark, BookmarkCheck, Loader2, RefreshCw, Sparkles } from 'lucide-react'
 import type { CandlestickData } from 'lightweight-charts'
 import SubPageShell from './SubPageShell'
 import { KlinePanel } from './KlinePanel'
 import { useChat } from '../contexts/ChatContext'
+import { useAppDialog } from '../contexts/AppDialogContext'
 import { buildAnalyzeStockPrefill } from '../utils/chatPrefill'
 
 type KlinePeriod = '1M' | '3M' | '6M' | '1Y' | '3Y' | '5Y'
@@ -63,6 +64,27 @@ const StockDetailView: React.FC = () => {
   const [valuation, setValuation] = useState<SectionState<StockValuation>>(emptySection)
   const [financials, setFinancials] = useState<SectionState<StockFinancialRow[]>>(emptySection)
   const [moneyflow, setMoneyflow] = useState<SectionState<StockMoneyflowRow[]>>(emptySection)
+  const { alert, confirm } = useAppDialog()
+  const [watchHeld, setWatchHeld] = useState(false)
+  const [watchItem, setWatchItem] = useState<WatchlistItem | null>(null)
+  const [watchBusy, setWatchBusy] = useState(false)
+  const [pickGroup, setPickGroup] = useState(false)
+
+  const loadWatchStatus = useCallback(async (code: string) => {
+    try {
+      const res = await window.api.getWatchlistStatus(code)
+      if (!res?.ok) {
+        setWatchHeld(false)
+        setWatchItem(null)
+        return
+      }
+      setWatchHeld(Boolean(res.held))
+      setWatchItem(res.item || null)
+    } catch {
+      setWatchHeld(false)
+      setWatchItem(null)
+    }
+  }, [])
 
   const loadQuote = useCallback(async (code: string) => {
     setQuote((s) => ({ ...s, loading: true, error: null }))
@@ -146,7 +168,56 @@ const StockDetailView: React.FC = () => {
     void loadValuation(tsCode)
     void loadFinancials(tsCode)
     void loadMoneyflow(tsCode)
-  }, [tsCode, loadQuote, loadValuation, loadFinancials, loadMoneyflow])
+    void loadWatchStatus(tsCode)
+    setPickGroup(false)
+  }, [tsCode, loadQuote, loadValuation, loadFinancials, loadMoneyflow, loadWatchStatus])
+
+  const addToWatchlist = async (group: WatchlistGroup) => {
+    if (!tsCode || watchBusy) return
+    setWatchBusy(true)
+    try {
+      const res = await window.api.addWatchlist({
+        ts_code: tsCode,
+        group,
+        name: quote.data?.name || undefined
+      })
+      if (!res?.ok) {
+        await alert({ title: res?.error || '加入自选失败' })
+        return
+      }
+      setPickGroup(false)
+      setWatchItem(res.item || null)
+      setWatchHeld(false)
+    } catch (e) {
+      await alert({ title: e instanceof Error ? e.message : '加入自选失败' })
+    } finally {
+      setWatchBusy(false)
+    }
+  }
+
+  const removeFromWatchlist = async () => {
+    if (!watchItem || watchBusy) return
+    const ok = await confirm({
+      title: '移出自选',
+      message: `从自选移除「${quote.data?.name || tsCode}」？异动提醒会一并取消。`,
+      confirmLabel: '移除',
+      danger: true
+    })
+    if (!ok) return
+    setWatchBusy(true)
+    try {
+      const res = await window.api.removeWatchlist(watchItem.id)
+      if (!res?.ok) {
+        await alert({ title: res?.error || '移除失败' })
+        return
+      }
+      setWatchItem(null)
+    } catch (e) {
+      await alert({ title: e instanceof Error ? e.message : '移除失败' })
+    } finally {
+      setWatchBusy(false)
+    }
+  }
 
   useEffect(() => {
     if (!tsCode) return
@@ -200,6 +271,53 @@ const StockDetailView: React.FC = () => {
           <div className="font-mono text-[11px] text-[var(--fa-faint)]">{tsCode}</div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
+          {watchHeld ? (
+            <span className="px-2 text-[11px] text-[var(--fa-faint)]">已在持仓</span>
+          ) : watchItem ? (
+            <button
+              type="button"
+              className="fa-icon-btn inline-flex items-center gap-1 px-2 text-[11px] font-medium"
+              disabled={watchBusy}
+              onClick={() => void removeFromWatchlist()}
+              title="移出自选"
+              aria-label="移出自选"
+            >
+              <BookmarkCheck size={14} />
+              移出自选
+            </button>
+          ) : (
+            <div className="relative">
+              <button
+                type="button"
+                className="fa-icon-btn inline-flex items-center gap-1 px-2 text-[11px] font-medium"
+                disabled={watchBusy}
+                onClick={() => setPickGroup((v) => !v)}
+                title="加入观察"
+                aria-label="加入观察"
+              >
+                <Bookmark size={14} />
+                加入观察
+              </button>
+              {pickGroup && (
+                <div className="absolute right-0 top-full z-20 mt-1 w-36 overflow-hidden rounded-xl border border-[var(--fa-border)] bg-[var(--fa-sidebar)] py-1 shadow-2xl">
+                  <button
+                    type="button"
+                    className="w-full px-3 py-1.5 text-left text-xs hover:bg-[var(--fa-surface-hover)]"
+                    onClick={() => void addToWatchlist('candidate')}
+                  >
+                    候选买入
+                  </button>
+                  <button
+                    type="button"
+                    className="w-full px-3 py-1.5 text-left text-xs hover:bg-[var(--fa-surface-hover)]"
+                    onClick={() => void addToWatchlist('track')}
+                  >
+                    长期跟踪
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
           <button
             type="button"
             className="fa-icon-btn inline-flex items-center gap-1 px-2 text-[11px] font-medium"

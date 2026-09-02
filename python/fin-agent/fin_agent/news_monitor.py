@@ -13,11 +13,13 @@ from fin_agent.news import (
     AkshareNewsAdapter,
 )
 from fin_agent.news_store import (
+    LIVE_SYMBOL_TYPES,
     NewsMonitorStateStore,
     NewsSubscriptionStore,
     NotifiedNewsStore,
 )
 from fin_agent.portfolio import PortfolioManager
+from fin_agent.watchlist import GROUPS as WATCHLIST_GROUPS, WatchlistStore
 
 
 logger = logging.getLogger(__name__)
@@ -232,9 +234,14 @@ class NewsMonitor:
                 return retry_payload
 
             portfolio_symbols = self._portfolio_symbols()
-            symbol_names = self._refresh_symbol_name_cache(portfolio_symbols)
+            watchlist_index = self._watchlist_index()
+            symbol_names = self._refresh_symbol_name_cache(
+                self._name_cache_symbols(
+                    subscriptions, portfolio_symbols, watchlist_index,
+                ),
+            )
             fetched, fetch_status = self._fetch_sources(
-                subscriptions, portfolio_symbols,
+                subscriptions, portfolio_symbols, watchlist_index,
             )
             if any(fetch_status.values()):
                 self.state_store.apply_fetch_status(
@@ -251,6 +258,7 @@ class NewsMonitor:
                     if key[0] == SOURCE_STOCK_NEWS_EM
                 },
                 symbol_names,
+                watchlist_index,
             )
             if not pending:
                 if baseline_updates:
@@ -288,7 +296,7 @@ class NewsMonitor:
                 ).isoformat(timespec="seconds")
             self._run_lock.release()
 
-    def _fetch_sources(self, subscriptions, portfolio_symbols):
+    def _fetch_sources(self, subscriptions, portfolio_symbols, watchlist_index=None):
         requested_sources = set()
         stock_symbols = set()
         for subscription in subscriptions:
@@ -296,10 +304,11 @@ class NewsMonitor:
             requested_sources.update(sources)
             if SOURCE_STOCK_NEWS_EM not in sources:
                 continue
-            if subscription.get("type") == "portfolio":
-                stock_symbols.update(portfolio_symbols)
-            else:
-                stock_symbols.update(subscription.get("symbols") or [])
+            stock_symbols.update(
+                self._live_candidates(
+                    subscription, portfolio_symbols, watchlist_index,
+                )
+            )
 
         desired = [
             (source, None)
@@ -431,6 +440,7 @@ class NewsMonitor:
         portfolio_symbols,
         completed_stock_symbols,
         symbol_names=None,
+        watchlist_index=None,
     ):
         symbol_names = symbol_names or {}
         pending = {}
@@ -450,6 +460,7 @@ class NewsMonitor:
                     fetched[source],
                     portfolio_symbols,
                     completed_stock_symbols,
+                    watchlist_index,
                 )
                 for baseline_source, items in batches:
                     current_ids = [item.id for item in items]
@@ -466,9 +477,10 @@ class NewsMonitor:
                             continue
                         matched_symbols = self._matched_symbols(
                             subscription, item, portfolio_symbols, symbol_names,
+                            watchlist_index,
                         )
                         if not self._matches(
-                            subscription, item, portfolio_symbols, matched_symbols,
+                            subscription, item, matched_symbols,
                         ):
                             continue
                         match = pending.setdefault(item.id, {
@@ -483,13 +495,12 @@ class NewsMonitor:
     @staticmethod
     def _subscription_source_batches(
         subscription, source, items, portfolio_symbols, completed_stock_symbols,
+        watchlist_index=None,
     ):
         if source != SOURCE_STOCK_NEWS_EM:
             return [(source, items)]
-        targets = (
-            set(portfolio_symbols)
-            if subscription.get("type") == "portfolio"
-            else set(subscription.get("symbols") or [])
+        targets = NewsMonitor._live_candidates(
+            subscription, portfolio_symbols, watchlist_index,
         )
         grouped = {}
         for symbol in targets & set(completed_stock_symbols):
@@ -503,7 +514,7 @@ class NewsMonitor:
         ]
 
     @staticmethod
-    def _matches(subscription, item, portfolio_symbols, matched_symbols):
+    def _matches(subscription, item, matched_symbols):
         haystack = f"{item.title}\n{item.summary}".casefold()
         excluded = [
             keyword.casefold()
@@ -520,7 +531,7 @@ class NewsMonitor:
         ]
         keyword_match = any(keyword in haystack for keyword in keywords)
         subscription_type = subscription.get("type")
-        if subscription_type == "portfolio":
+        if subscription_type in LIVE_SYMBOL_TYPES:
             if not matched_symbols:
                 return False
             return keyword_match if keywords else True
@@ -532,17 +543,19 @@ class NewsMonitor:
         return keyword_match or symbol_match
 
     @staticmethod
-    def _matched_symbols(subscription, item, portfolio_symbols, symbol_names=None):
-        if subscription.get("type") == "portfolio":
-            candidates = set(portfolio_symbols)
-        else:
-            candidates = set(subscription.get("symbols") or [])
+    def _matched_symbols(
+        subscription, item, portfolio_symbols, symbol_names=None,
+        watchlist_index=None,
+    ):
+        candidates = NewsMonitor._live_candidates(
+            subscription, portfolio_symbols, watchlist_index,
+        )
         matched = set(item.symbols) & candidates
         # 全球快讯（非 stock_news_em）不含明确代码上下文，须补充公司名匹配；
-        # 仅对持仓订阅生效，且只用规范化后的简称，避免短词模糊误报。
+        # 仅对持仓/自选订阅生效，且只用规范化后的简称，避免短词模糊误报。
         if (
             symbol_names
-            and subscription.get("type") == "portfolio"
+            and subscription.get("type") in LIVE_SYMBOL_TYPES
             and item.source != SOURCE_STOCK_NEWS_EM
         ):
             haystack = _normalize_company_text(f"{item.title}\n{item.summary}")
@@ -591,6 +604,43 @@ class NewsMonitor:
         symbols = set()
         for portfolio in manager.data.get("portfolios", {}).values():
             symbols.update((portfolio.get("positions") or {}).keys())
+        return sorted(symbols)
+
+    @staticmethod
+    def _watchlist_index():
+        return WatchlistStore().index_by_group()
+
+    @staticmethod
+    def _watchlist_symbols_for(subscription, watchlist_index=None):
+        index = watchlist_index or {}
+        groups = subscription.get("groups")
+        if groups is None:
+            groups = list(WATCHLIST_GROUPS)
+        symbols = set()
+        for group in groups:
+            symbols.update(index.get(group) or ())
+        return symbols
+
+    @staticmethod
+    def _live_candidates(subscription, portfolio_symbols, watchlist_index=None):
+        subscription_type = subscription.get("type")
+        if subscription_type == "portfolio":
+            return set(portfolio_symbols or [])
+        if subscription_type == "watchlist":
+            return NewsMonitor._watchlist_symbols_for(subscription, watchlist_index)
+        return set(subscription.get("symbols") or [])
+
+    @staticmethod
+    def _name_cache_symbols(subscriptions, portfolio_symbols, watchlist_index=None):
+        symbols = set()
+        for subscription in subscriptions:
+            if subscription.get("type") not in LIVE_SYMBOL_TYPES:
+                continue
+            symbols.update(
+                NewsMonitor._live_candidates(
+                    subscription, portfolio_symbols, watchlist_index,
+                )
+            )
         return sorted(symbols)
 
     @staticmethod
@@ -648,17 +698,22 @@ class NewsMonitor:
         }
 
     @staticmethod
-    def _live_pending_subscription_ids(item, subscriptions_by_id, portfolio_symbols):
-        """发送前再按当前订阅与持仓过滤，避免已删持仓仍弹出「持仓新闻」。"""
+    def _live_pending_subscription_ids(
+        item, subscriptions_by_id, portfolio_symbols, watchlist_index=None,
+    ):
+        """发送前再按当前订阅与持仓/自选过滤，避免已删代码仍弹出动态订阅新闻。"""
         live = []
         holdings = set(portfolio_symbols or [])
         for sid in item.get("pending_subscription_ids") or []:
             subscription = subscriptions_by_id.get(sid)
             if not subscription or not subscription.get("enabled", True):
                 continue
-            if subscription.get("type") == "portfolio":
+            if subscription.get("type") in LIVE_SYMBOL_TYPES:
                 matched = set(item.get("matched_symbols") or [])
-                if not (matched & holdings):
+                candidates = NewsMonitor._live_candidates(
+                    subscription, holdings, watchlist_index,
+                )
+                if not (matched & candidates):
                     continue
             live.append(sid)
         return live
@@ -679,11 +734,12 @@ class NewsMonitor:
             if subscription.get("id")
         }
         portfolio_symbols = self._portfolio_symbols()
+        watchlist_index = self._watchlist_index()
         items = []
         stale_ids = []
         for item in raw_items:
             live_ids = self._live_pending_subscription_ids(
-                item, subscriptions_by_id, portfolio_symbols,
+                item, subscriptions_by_id, portfolio_symbols, watchlist_index,
             )
             news_id = item.get("id")
             if not live_ids:

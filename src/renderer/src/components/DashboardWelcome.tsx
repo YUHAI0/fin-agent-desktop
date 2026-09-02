@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { Sparkles } from 'lucide-react'
 import { useAppDialog } from '../contexts/AppDialogContext'
 import { useChat } from '../contexts/ChatContext'
 import {
@@ -147,22 +148,30 @@ const DashboardWelcome: React.FC<DashboardWelcomeProps> = ({ onOpenReminders }) 
 
   return (
     <div className="fa-dashboard-welcome no-drag">
-      <div className="fa-dashboard-welcome-inner">
-        {loadError && (
+      {loadError && (
+        <div className="fa-dashboard-welcome-inner">
           <div className="fa-card flex items-center justify-between gap-3 p-4 text-sm text-[var(--fa-muted)]">
             <span>仪表盘加载失败，可直接在下方提问</span>
             <button type="button" className="fa-btn-ghost px-3 py-1.5 text-xs" onClick={() => void loadSummary()}>
               重试
             </button>
           </div>
-        )}
+        </div>
+      )}
 
-        {!loadError && loading && !summary && (
-          <p className="text-center text-sm text-[var(--fa-faint)]">加载中…</p>
-        )}
+      {!loadError && loading && !summary && (
+        <div className="fa-hero" aria-hidden>
+          <div className="fa-hero-icon">
+            <span className="fa-hero-icon-mark">
+              <Sparkles size={28} strokeWidth={1.5} className="fa-hero-icon-base" />
+              <Sparkles size={28} strokeWidth={1.65} className="fa-hero-icon-shine" />
+            </span>
+          </div>
+        </div>
+      )}
 
-        {!loadError && summary && snapshot && (
-          <>
+      {!loadError && summary && snapshot && (
+      <div className="fa-dashboard-welcome-inner">
             <section className="fa-card p-4">
               <div className="flex items-center justify-between gap-3">
                 <h2 className="min-w-0 truncate text-sm font-semibold">{snapshot.portfolio_name}</h2>
@@ -313,9 +322,8 @@ const DashboardWelcome: React.FC<DashboardWelcomeProps> = ({ onOpenReminders }) 
                 今日该关注什么
               </button>
             </section>
-          </>
-        )}
       </div>
+      )}
 
       <StockSearchModal
         open={stockSearchOpen}

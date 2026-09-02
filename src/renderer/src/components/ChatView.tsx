@@ -3,7 +3,7 @@ import { flushSync } from 'react-dom'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Settings, ChevronDown, ChevronRight, Check, Loader2, Terminal, Bell, Briefcase, Newspaper, ArrowUp, Square, Brain, Sun, Moon, Search, PanelLeft, CircleUser } from 'lucide-react'
+import { Settings, ChevronDown, ChevronRight, Check, Loader2, Terminal, Bell, Briefcase, Bookmark, Newspaper, ArrowUp, Square, Brain, Sun, Moon, Search, PanelLeft, CircleUser } from 'lucide-react'
 import { useChat, ChatBlock, Message } from '../contexts/ChatContext'
 import { useTheme } from '../contexts/ThemeContext'
 import { KlinePanel } from './KlinePanel'
@@ -26,6 +26,7 @@ import { MaLadderPanel } from './MaLadderPanel'
 import { toolDisplayName } from '../utils/toolDisplayName'
 import { MarkdownExternalLink } from './ExternalLink'
 import NewsChatCard from './news/NewsChatCard'
+import ReportCard from './ReportCard'
 import { NEWS_CARD_INTENT_PROMPTS, type NewsCardPayload } from '../utils/chatPrefill'
 
 // ToolExecutionBlock type helper
@@ -195,6 +196,7 @@ function assistantHasStarted(msgs: Message[]): boolean {
   if (!last || last.role !== 'assistant') return false
   if (last.content?.trim()) return true
   return (last.blocks || []).some((block) => {
+    if (block.type === 'report') return true
     if (block.type === 'tool_execution') return true
     if (block.type === 'text' || block.type === 'thinking') return Boolean(block.content)
     return false
@@ -725,6 +727,20 @@ const ChatView: React.FC = () => {
 
                 const resultStr = rawResult.length > 500 ? rawResult.substring(0, 500) + '...' : rawResult
                 assistantMsg.logs = (assistantMsg.logs || '') + `[Tool Result] ${resultStr}\n`
+            } else if (data.type === 'report' && data.report && typeof data.report === 'object') {
+                const r = data.report as AnalysisReportPayload
+                if (r.kind && r.title && r.sections) {
+                    assistantMsg.blocks.push({
+                        type: 'report',
+                        kind: r.kind,
+                        title: r.title,
+                        depth: r.depth || 'standard',
+                        symbols: Array.isArray(r.symbols) ? r.symbols : [],
+                        portfolio_id: r.portfolio_id ?? null,
+                        sections: r.sections,
+                        disclaimer: r.disclaimer || '以上内容仅供参考，不构成投资建议。'
+                    })
+                }
             } else if (data.type === 'error') {
                 assistantMsg.content += `\n**Error:** ${data.content}`
                 assistantMsg.blocks.push({ type: 'text', content: `\n**Error:** ${data.content}` })
@@ -1011,6 +1027,15 @@ const ChatView: React.FC = () => {
             </button>
             <button
               type="button"
+              onClick={() => navigate('/reports')}
+              className="fa-icon-btn focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--fa-accent)]"
+              title="研报夹"
+              aria-label="研报夹"
+            >
+              <Bookmark size={18} />
+            </button>
+            <button
+              type="button"
               onClick={() => navigate('/profile')}
               className="fa-icon-btn focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--fa-accent)]"
               title="投资画像"
@@ -1102,6 +1127,31 @@ const ChatView: React.FC = () => {
                         if (block.type === 'tool_execution') {
                           if (HIDDEN_TOOL_NAMES.has(block.name)) return null
                           return <ToolExecutionView key={bIdx} block={block} />
+                        }
+                        if (block.type === 'report') {
+                          return (
+                            <ReportCard
+                              key={bIdx}
+                              block={block}
+                              sessionId={activeSessionId}
+                              onFavoriteId={(id) => {
+                                setMessages((prev) => {
+                                  const next = [...prev]
+                                  const msg = next[idx]
+                                  if (!msg?.blocks) return prev
+                                  next[idx] = {
+                                    ...msg,
+                                    blocks: msg.blocks.map((b, i) =>
+                                      i === bIdx && b.type === 'report'
+                                        ? { ...b, favorite_id: id }
+                                        : b
+                                    )
+                                  }
+                                  return next
+                                })
+                              }}
+                            />
+                          )
                         }
                         if (block.type === 'text') {
                           const md = stripFinAgentChoicesForDisplay(block.content)

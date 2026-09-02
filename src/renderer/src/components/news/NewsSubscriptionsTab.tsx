@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { Loader2, Pencil, Plus, Trash2 } from 'lucide-react'
 import { useAppDialog } from '../../contexts/AppDialogContext'
-import { NEWS_SOURCE_LABELS, NEWS_TYPE_LABELS } from '../../utils/news'
+import { NEWS_SOURCE_LABELS, NEWS_TYPE_LABELS, formatWatchlistGroups } from '../../utils/news'
 import NewsSubscriptionDialog from './NewsSubscriptionDialog'
 
 interface NewsSubscriptionsTabProps {
@@ -11,7 +11,7 @@ interface NewsSubscriptionsTabProps {
   onChanged: () => void
 }
 
-const TYPE_ORDER: NewsSubscriptionType[] = ['sector', 'topic', 'portfolio']
+const TYPE_ORDER: NewsSubscriptionType[] = ['sector', 'topic', 'portfolio', 'watchlist']
 
 const NewsSubscriptionsTab: React.FC<NewsSubscriptionsTabProps> = ({
   subscriptions,
@@ -147,7 +147,12 @@ const NewsSubscriptionsTab: React.FC<NewsSubscriptionsTabProps> = ({
                         ))}
                       </div>
                       <div className="mt-1.5 break-words text-xs leading-relaxed text-[var(--fa-muted)]">
-                        {sub.type === 'portfolio' ? (
+                        {sub.type === 'watchlist' ? (
+                          <span>
+                            自动跟随自选：{formatWatchlistGroups(sub.groups)}
+                            {sub.keywords.length > 0 ? `，并需包含：${sub.keywords.join('、')}` : ''}
+                          </span>
+                        ) : sub.type === 'portfolio' ? (
                           <span>
                             自动跟随全部组合的当前持仓
                             {sub.keywords.length > 0 ? `，并需包含：${sub.keywords.join('、')}` : ''}

@@ -13,6 +13,12 @@ from fin_agent.tools.portfolio_tools import (
     get_portfolio_status, 
     clear_portfolio
 )
+from fin_agent.tools.watchlist_tools import (
+    WATCHLIST_TOOLS_SCHEMA,
+    add_watchlist,
+    list_watchlist,
+    remove_watchlist,
+)
 from fin_agent.tools.scheduler_tools import (
     SCHEDULER_TOOLS_SCHEMA,
     add_price_alert,
@@ -1981,6 +1987,7 @@ BASE_TOOLS_SCHEMA = [
 TOOLS_SCHEMA = (
     BASE_TOOLS_SCHEMA
     + PORTFOLIO_TOOLS_SCHEMA
+    + WATCHLIST_TOOLS_SCHEMA
     + SCHEDULER_TOOLS_SCHEMA
     + PROFILE_TOOLS_SCHEMA
     + NEWS_TOOLS_SCHEMA
@@ -2104,6 +2111,12 @@ def execute_tool_call(tool_name, arguments):
         return get_portfolio_status(**arguments)
     elif tool_name == "clear_portfolio":
         return clear_portfolio(**arguments)
+    elif tool_name == "add_watchlist":
+        return add_watchlist(**arguments)
+    elif tool_name == "list_watchlist":
+        return list_watchlist(**arguments)
+    elif tool_name == "remove_watchlist":
+        return remove_watchlist(**arguments)
     elif tool_name == "add_price_alert":
         return add_price_alert(**arguments)
     elif tool_name == "list_alerts":

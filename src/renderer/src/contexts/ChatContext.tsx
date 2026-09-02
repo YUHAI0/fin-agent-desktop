@@ -32,6 +32,22 @@ export type ChatBlock =
         matched_symbols: string[]
       }
     }
+  | {
+      type: 'report'
+      kind: 'stock_checkup' | 'portfolio_diagnose' | 'trade_memo'
+      title: string
+      depth: 'brief' | 'standard' | 'full'
+      symbols: string[]
+      portfolio_id?: string | null
+      sections: {
+        conclusion: string
+        evidence: string
+        risk: string
+        next: string
+      }
+      disclaimer: string
+      favorite_id?: string
+    }
 
 export interface Message {
   role: 'user' | 'assistant'

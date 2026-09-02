@@ -804,6 +804,7 @@ def handle_news_subscription_create(req):
             sources=req.body.get("sources"),
             enabled=req.body.get("enabled", True),
             symbols=req.body.get("symbols"),
+            groups=req.body.get("groups"),
         )
     except ValueError as e:
         raise ApiError(400, str(e))
@@ -819,6 +820,7 @@ def handle_news_subscription_update(req):
         key: req.body[key]
         for key in (
             "name", "enabled", "keywords", "exclude_keywords", "sources", "symbols",
+            "groups",
         )
         if key in req.body
     }
@@ -1085,6 +1087,160 @@ def handle_dashboard_comment(req):
     )
 
 
+@route("GET", "/reports/favorites")
+def handle_report_favorite_list(req):
+    from fin_agent.analysis_favorites import AnalysisFavoritesStore
+
+    return {"ok": True, "items": AnalysisFavoritesStore().list_items()}
+
+
+@route("POST", "/reports/favorites")
+def handle_report_favorite_add(req):
+    from fin_agent.analysis_favorites import AnalysisFavoritesStore
+
+    body = req.body or {}
+    try:
+        record = AnalysisFavoritesStore().add(body, body.get("source_session_id"))
+    except ValueError as e:
+        return {"ok": False, "error": str(e) or "收藏失败"}
+    except Exception:
+        return {"ok": False, "error": "收藏失败"}
+    return {"ok": True, "id": record["id"]}
+
+
+@route("DELETE", "/reports/favorites")
+def handle_report_favorite_delete(req):
+    from fin_agent.analysis_favorites import AnalysisFavoritesStore
+
+    body = req.body or {}
+    ok = AnalysisFavoritesStore().remove((body or {}).get("id"))
+    if not ok:
+        return {"ok": False, "error": "未找到该收藏"}
+    return {"ok": True}
+
+
+def _watchlist_quotes(items):
+    codes = []
+    seen = set()
+    for item in items:
+        code = item.get("ts_code")
+        if code and code not in seen:
+            seen.add(code)
+            codes.append(code)
+    if not codes:
+        return items
+    try:
+        from fin_agent.datasources import get_provider
+
+        df = get_provider().get_realtime_price(codes)
+    except Exception:
+        for item in items:
+            item.setdefault("price", None)
+            item.setdefault("pct_chg", None)
+        return items
+    quotes = {}
+    if df is not None and not df.empty:
+        for _, row in df.iterrows():
+            code = row.get("ts_code")
+            if not code:
+                continue
+            try:
+                price = float(row.get("price") or 0)
+            except (TypeError, ValueError):
+                price = 0
+            try:
+                pct = float(row.get("pct_chg") or 0)
+            except (TypeError, ValueError):
+                pct = 0
+            quotes[str(code)] = {
+                "price": price or None,
+                "pct_chg": pct if price else None,
+                "name": row.get("name") or None,
+            }
+    for item in items:
+        q = quotes.get(item.get("ts_code")) or {}
+        item["price"] = q.get("price")
+        item["pct_chg"] = q.get("pct_chg")
+        if q.get("name") and not item.get("name"):
+            item["name"] = q["name"]
+    return items
+
+
+@route("GET", "/watchlist")
+def handle_watchlist_list(req):
+    from fin_agent.watchlist import WatchlistStore
+
+    items = WatchlistStore().list_items()
+    return {"ok": True, "items": _watchlist_quotes(items)}
+
+
+@route("GET", "/watchlist/status")
+def handle_watchlist_status(req):
+    from fin_agent.watchlist import WatchlistStore
+    from fin_agent.portfolio import PortfolioManager
+
+    ts_code = (req.query.get("ts_code") or "").strip()
+    if not ts_code:
+        return {"ok": False, "error": "缺少股票代码"}
+    store = WatchlistStore()
+    item = store.find_by_ts_code(ts_code)
+    held = PortfolioManager().is_held(ts_code)
+    return {"ok": True, "held": held, "item": item}
+
+
+@route("POST", "/watchlist/add")
+def handle_watchlist_add(req):
+    from fin_agent.watchlist import WatchlistStore
+
+    body = req.body or {}
+    try:
+        item = WatchlistStore().add(body.get("ts_code"), body.get("group"), body.get("name"))
+    except ValueError as e:
+        return {"ok": False, "error": str(e) or "加入自选失败"}
+    except Exception:
+        return {"ok": False, "error": "加入自选失败"}
+    return {"ok": True, "item": item}
+
+
+@route("POST", "/watchlist/group")
+def handle_watchlist_group(req):
+    from fin_agent.watchlist import WatchlistStore
+
+    body = req.body or {}
+    try:
+        item = WatchlistStore().set_group(body.get("id"), body.get("group"))
+    except ValueError as e:
+        return {"ok": False, "error": str(e) or "改组失败"}
+    except Exception:
+        return {"ok": False, "error": "改组失败"}
+    return {"ok": True, "item": item}
+
+
+@route("POST", "/watchlist/alert-pct")
+def handle_watchlist_alert_pct(req):
+    from fin_agent.watchlist import WatchlistStore
+
+    body = req.body or {}
+    try:
+        item = WatchlistStore().set_alert_pct(body.get("id"), body.get("pct"))
+    except ValueError as e:
+        return {"ok": False, "error": str(e) or "改阈值失败"}
+    except Exception:
+        return {"ok": False, "error": "改阈值失败"}
+    return {"ok": True, "item": item}
+
+
+@route("POST", "/watchlist/remove")
+def handle_watchlist_remove(req):
+    from fin_agent.watchlist import WatchlistStore
+
+    body = req.body or {}
+    ok = WatchlistStore().remove((body or {}).get("id"))
+    if not ok:
+        return {"ok": False, "error": "未找到该自选"}
+    return {"ok": True}
+
+
 @route("GET", "/portfolio/detail")
 def handle_portfolio_detail(req):
     try:
@@ -1293,7 +1449,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     raise ApiError(403, "Cross-origin requests are not allowed")
             query = {k: v[0] for k, v in parse_qs(parsed.query).items()}
             body = {}
-            if method == 'POST':
+            if method in ('POST', 'DELETE'):
                 length = int(self.headers.get('Content-Length', 0))
                 # 空 body 必须挡在 handler 之前：/config/save 拿到空字典会用一串
                 # 空字符串覆盖用户的 .env。字段全可选的端点也应显式发 {}。
@@ -1326,6 +1482,15 @@ class RequestHandler(BaseHTTPRequestHandler):
             pass
         except Exception as e:
             sys.stderr.write(f"Fatal error in do_POST: {e}\n{traceback.format_exc()}\n")
+            sys.stderr.flush()
+
+    def do_DELETE(self):
+        try:
+            self._dispatch('DELETE')
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+            pass
+        except Exception as e:
+            sys.stderr.write(f"Fatal error in do_DELETE: {e}\n{traceback.format_exc()}\n")
             sys.stderr.flush()
 
     def _handle_chat_stream(self):

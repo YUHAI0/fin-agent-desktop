@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react'
 import PositionEditModal from './PositionEditModal'
+import WatchlistPanel from './WatchlistPanel'
 import { useAppDialog } from '../contexts/AppDialogContext'
 import { useChat } from '../contexts/ChatContext'
 import { buildPortfolioDiagnosePrefill } from '../utils/chatPrefill'
@@ -23,6 +24,7 @@ const PortfolioView: React.FC = () => {
   const [modalOpen, setModalOpen] = useState(false)
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create')
   const [editing, setEditing] = useState<PortfolioPosition | undefined>(undefined)
+  const [pageTab, setPageTab] = useState<'holdings' | 'watchlist'>('holdings')
 
   const loadPortfolios = useCallback(async () => {
     const res = await window.api.listPortfolios()
@@ -132,36 +134,61 @@ const PortfolioView: React.FC = () => {
           <h1 className="text-sm font-semibold">投资组合</h1>
         </div>
         <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => void handleDiagnose()}
-            className="fa-btn-ghost inline-flex items-center gap-1 px-3 py-1.5 text-xs"
-          >
-            <Sparkles size={14} aria-hidden />
-            组合诊断
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setModalMode('create')
-              setEditing(undefined)
-              setModalOpen(true)
-            }}
-            className="fa-btn-primary inline-flex items-center gap-1 px-3 py-1.5 text-xs"
-          >
-            <Plus size={14} aria-hidden />
-            添加持仓
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleDeletePortfolio()}
-            className="fa-btn-ghost px-3 py-1.5 text-xs hover:!text-[var(--fa-danger)]"
-          >
-            删除组合
-          </button>
+          {pageTab === 'holdings' && (
+            <>
+              <button
+                type="button"
+                onClick={() => void handleDiagnose()}
+                className="fa-btn-ghost inline-flex items-center gap-1 px-3 py-1.5 text-xs"
+              >
+                <Sparkles size={14} aria-hidden />
+                组合诊断
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setModalMode('create')
+                  setEditing(undefined)
+                  setModalOpen(true)
+                }}
+                className="fa-btn-primary inline-flex items-center gap-1 px-3 py-1.5 text-xs"
+              >
+                <Plus size={14} aria-hidden />
+                添加持仓
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleDeletePortfolio()}
+                className="fa-btn-ghost px-3 py-1.5 text-xs hover:!text-[var(--fa-danger)]"
+              >
+                删除组合
+              </button>
+            </>
+          )}
         </div>
       </div>
 
+      <div className="fa-news-tabs">
+        <button
+          type="button"
+          onClick={() => setPageTab('holdings')}
+          className={`fa-news-tab ${pageTab === 'holdings' ? 'fa-news-tab-active' : ''}`}
+        >
+          持仓
+        </button>
+        <button
+          type="button"
+          onClick={() => setPageTab('watchlist')}
+          className={`fa-news-tab ${pageTab === 'watchlist' ? 'fa-news-tab-active' : ''}`}
+        >
+          自选
+        </button>
+      </div>
+
+      {pageTab === 'watchlist' ? (
+        <WatchlistPanel />
+      ) : (
+        <>
       <div className="flex shrink-0 items-center gap-2 overflow-x-auto border-b border-[var(--fa-border-subtle)] px-4 py-2.5">
         {portfolios.map((p) => (
           <button
@@ -317,6 +344,8 @@ const PortfolioView: React.FC = () => {
             </div>
           ))}
       </div>
+        </>
+      )}
 
       <PositionEditModal
         open={modalOpen}

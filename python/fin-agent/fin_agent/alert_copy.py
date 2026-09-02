@@ -83,3 +83,29 @@ def format_alert(task: dict, *, stock_name: str, current_price: float) -> AlertC
     title = f"股价提醒：{label}"
     body = message
     return AlertCopy(title=title, body=body, condition_label=condition_label, message=message)
+
+
+def format_watchlist_move(task: dict, *, stock_name: str, current_price: float, pct_chg: float) -> AlertCopy:
+    ts_code = task.get("ts_code") or ""
+    label = _stock_label(stock_name, ts_code)
+    pct = task.get("pct")
+    try:
+        pct_n = float(pct)
+    except (TypeError, ValueError):
+        pct_n = 0.0
+    try:
+        chg = float(pct_chg)
+    except (TypeError, ValueError):
+        chg = 0.0
+    verb = "上涨" if chg >= 0 else "下跌"
+    message = (
+        f"{label} 今日{verb} {abs(chg):.1f}%，超过观察阈值 {pct_n:g}%"
+    )
+    condition_label = f"涨跌幅 ±{pct_n:g}%"
+    title = f"自选异动：{label}"
+    return AlertCopy(
+        title=title,
+        body=message,
+        condition_label=condition_label,
+        message=message,
+    )

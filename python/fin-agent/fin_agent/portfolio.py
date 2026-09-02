@@ -148,6 +148,34 @@ class PortfolioManager:
         self._save_portfolio()
         return "已切换当前组合。"
 
+    def is_held(self, ts_code) -> bool:
+        """任一组合是否持有该代码（规范化后比较）。"""
+        from fin_agent.datasources.normalize import to_ts_code
+
+        try:
+            code = to_ts_code(ts_code)
+        except ValueError:
+            code = str(ts_code or "").strip().upper()
+        if not code:
+            return False
+        for portfolio in self.data.get("portfolios", {}).values():
+            for key in (portfolio.get("positions") or {}):
+                try:
+                    if to_ts_code(key) == code:
+                        return True
+                except ValueError:
+                    if str(key).strip().upper() == code:
+                        return True
+        return False
+
+    def _evict_watchlist(self, ts_code):
+        try:
+            from fin_agent.watchlist import WatchlistStore
+
+            WatchlistStore().remove_by_ts_code(ts_code)
+        except Exception:
+            pass
+
     # ---------- 持仓级操作 ----------
 
     def add_position(self, ts_code, amount, price, portfolio=None):
@@ -174,6 +202,7 @@ class PortfolioManager:
             }
 
         self._save_portfolio()
+        self._evict_watchlist(ts_code)
         return f"Successfully added {amount} shares of {ts_code} at {price:.2f}."
 
     def create_position(self, ts_code, amount, cost, bought_at="", note="", portfolio=None):
@@ -193,6 +222,7 @@ class PortfolioManager:
             "note": note or "",
         }
         self._save_portfolio()
+        self._evict_watchlist(ts_code)
         return f"已添加持仓 {ts_code}。"
 
     def update_position(self, ts_code, amount, cost, bought_at="", note="", portfolio=None):

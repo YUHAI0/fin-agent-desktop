@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from colorama import Fore, Style
 from fin_agent.config import Config
 from fin_agent.llm.factory import LLMFactory
+from fin_agent.report_parse import DISCLAIMER, ReportStreamFilter, extract_report
 from fin_agent.tools.tushare_tools import TOOLS_SCHEMA, execute_tool_call
 from fin_agent.tools.profile_tools import get_profile_manager
 from fin_agent.utils import FinMarkdown
@@ -308,8 +309,12 @@ class FinAgent:
             "技术指标：get_technical_indicators；形态：get_technical_patterns；"
             "资金流/涨跌停/概念：对应工具；策略回测：run_backtest。\n"
             "持仓查询（我的持仓等）：get_portfolio_status；增删持仓：add_portfolio_position / remove_portfolio_position。\n"
+            "自选/观察列表（关注未买入，与持仓分开）：list_watchlist 查看；add_watchlist 加入；remove_watchlist 移除。"
+            "group 为 candidate（候选买入，默认）或 track（长期跟踪）。已持仓不能加入自选。"
+            "用户说「加入自选」「加入观察」且上下文已有股票代码时必须调用 add_watchlist，不要声称没有工具。\n"
             "新闻：查本地已推送 → query_notified_news；按需查全量/个股/板块 → query_news；"
-            "订阅用 create_news_subscription（持仓订阅不要传 symbols）。\n"
+            "订阅用 create_news_subscription（持仓订阅不要传 symbols；"
+            "自选订阅 type=watchlist，不要传 symbols，可用 groups：candidate/track，省略则跟随两组）。\n"
             "管理订阅：list/update/pause/enable/delete_news_subscription；仅用户要求立即刷新时用 refresh_news。\n"
             "新闻通过桌面通知推送；不要声称后台 LLM 会生成新闻摘要。\n"
             "创建/更新/暂停/启用/删除/刷新操作，须等工具返回后再汇报结果。\n"
@@ -331,6 +336,24 @@ class FinAgent:
             "- beginner（新手）：解释专业术语，用简版说明，少堆砌指标，侧重「这意味着什么」。\n"
             "- experienced（老手）：可给完整指标表与数据，少客套与基础科普。\n"
             "- Unknown：适中深度，必要时简短解释术语。\n\n"
+            "### 结构化报告 FIN_AGENT_REPORT_JSON ###\n"
+            "下列三类意图的最终回复必须在全文末尾单独一行输出标记"
+            "（不要放进代码围栏），紧跟一个 JSON 对象：\n"
+            "- stock_checkup：分析/体检某只股票、个股基本面技术面。"
+            "「依据」须覆盖基本面、技术面、估值；完整版加指标表。\n"
+            "- portfolio_diagnose：组合诊断/体检、持仓健不健康。"
+            "「依据」须覆盖行业分布、集中度、盈亏归因、与风险偏好是否匹配；"
+            "「下一步」给调仓建议。\n"
+            "- trade_memo：该不该买/卖、能不能上车、仓位与止损。"
+            "「依据」须覆盖看多或看空理由、支撑/压力位；"
+            "「下一步」给建议仓位与止损参考。\n"
+            "JSON 字段：kind、title、depth、symbols、portfolio_id、"
+            "sections.conclusion/evidence/risk/next、disclaimer。\n"
+            "depth 必须按当前画像：beginner→brief，experienced→full，Unknown→standard。"
+            "章节标题仍是结论/依据/风险/下一步，不要另起一套一级标题。\n"
+            "问候、查现价、设提醒、纯工具确认、新闻闲聊禁止输出该标记。\n"
+            f"disclaimer 固定为：{DISCLAIMER}\n"
+            "该行之后仍可追加 FIN_AGENT_CHOICES_JSON。\n\n"
             "### 快捷回复 FIN_AGENT_CHOICES_JSON（高优先级） ###\n"
             "每次实质性回复末尾追加一行：FIN_AGENT_CHOICES_JSON + 紧凑 JSON 数组（2-8 条）。\n"
             "每条含 label 与 send，且二者相同，为简短中文行动意图（如「设置价格提醒」「组合诊断」「深入 MACD 分析」），"
@@ -403,7 +426,7 @@ class FinAgent:
         """
         Generator function that yields events for the chat interaction.
         Yields dicts with 'type' and 'content'/'data'.
-        Types: 'content', 'thinking', 'tool_call', 'tool_result', 'error', 'log', 'answer'
+        Types: 'content', 'thinking', 'tool_call', 'tool_result', 'error', 'log', 'answer', 'report'
         """
         import sys
         from fin_agent.utils import debug_print
@@ -432,6 +455,15 @@ class FinAgent:
 
         step = 0
         context_retries = 0
+        report_filter = ReportStreamFilter()
+
+        def emit_content(text):
+            if not text:
+                return
+            visible = report_filter.feed(text)
+            if visible:
+                yield {"type": "content", "content": visible}
+
         try:
             while True:
                 step += 1
@@ -472,7 +504,8 @@ class FinAgent:
                                             if tag in buffer:
                                                 pre, buffer = buffer.split(tag, 1)
                                                 if pre:
-                                                    yield {"type": "content", "content": pre}
+                                                    for ev in emit_content(pre):
+                                                        yield ev
                                                 yield {"type": "log", "content": "Thinking..."}
                                                 thinking_state = True
                                                 continue # Re-evaluate buffer in thinking state
@@ -481,7 +514,8 @@ class FinAgent:
                                             # If no '<', yield all
                                             if "<" not in buffer:
                                                 if buffer:
-                                                    yield {"type": "content", "content": buffer}
+                                                    for ev in emit_content(buffer):
+                                                        yield ev
                                                     buffer = ""
                                                 break
                                             
@@ -489,7 +523,8 @@ class FinAgent:
                                             idx = buffer.find("<")
                                             # Yield everything before '<'
                                             if idx > 0:
-                                                yield {"type": "content", "content": buffer[:idx]}
+                                                for ev in emit_content(buffer[:idx]):
+                                                    yield ev
                                                 buffer = buffer[idx:]
                                             
                                             # Now buffer starts with '<'
@@ -511,14 +546,16 @@ class FinAgent:
                                             if len(buffer) >= len(tag):
                                                 # We know it starts with < but is not <think>
                                                 # Yield the < and continue
-                                                yield {"type": "content", "content": "<"}
+                                                for ev in emit_content("<"):
+                                                    yield ev
                                                 buffer = buffer[1:]
                                                 continue
                                             
                                             # If len(buffer) < len(tag), we checked startswith above.
                                             # If it didn't match startswith, it's not our tag.
                                             if not tag.startswith(buffer):
-                                                 yield {"type": "content", "content": "<"}
+                                                 for ev in emit_content("<"):
+                                                     yield ev
                                                  buffer = buffer[1:]
                                                  continue
                                             
@@ -573,7 +610,8 @@ class FinAgent:
                                         if thinking_state:
                                             yield {"type": "thinking", "content": buffer}
                                         else:
-                                            yield {"type": "content", "content": buffer}
+                                            for ev in emit_content(buffer):
+                                                yield ev
                                         buffer = ""
 
                                     # Yield the tool call chunk to frontend for real-time update
@@ -590,7 +628,8 @@ class FinAgent:
                                 if thinking_state:
                                     yield {"type": "thinking", "content": buffer}
                                 else:
-                                    yield {"type": "content", "content": buffer}
+                                    for ev in emit_content(buffer):
+                                        yield ev
                             
                         except KeyboardInterrupt:
                             # print("DEBUG: KeyboardInterrupt during iteration", file=sys.stderr)
@@ -609,7 +648,8 @@ class FinAgent:
                         # print("DEBUG: Handling non-stream response", file=sys.stderr)
                         message = response
                         if message.content:
-                            yield {"type": "content", "content": message.content}
+                            for ev in emit_content(message.content):
+                                yield ev
 
                 except Exception as e:
                     import traceback
@@ -637,10 +677,14 @@ class FinAgent:
                 # If no tool calls, this is the final answer
                 if not message.tool_calls:
                     answer = message.content if message.content else ""
-                    # debug_print(f"No tool calls, finishing. Answer: '{answer[:100] if answer else '(empty)'}'", file=sys.stderr)
-                    self.history.append(self._to_dict(message)) # Keep history
-                    # Always yield answer event, even if empty, so frontend knows we're done
-                    yield {"type": "answer", "content": answer}
+                    leftover = report_filter.flush()
+                    if leftover:
+                        yield {"type": "content", "content": leftover}
+                    cleaned, report = extract_report(answer)
+                    self.history.append(self._to_dict(message))
+                    if report:
+                        yield {"type": "report", "report": report}
+                    yield {"type": "answer", "content": cleaned}
                     return
 
                 # Handle tool calls

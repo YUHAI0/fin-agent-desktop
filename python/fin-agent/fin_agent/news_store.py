@@ -13,20 +13,26 @@ import uuid
 from fin_agent.config import Config
 from fin_agent.datasources.normalize import to_ts_code
 from fin_agent.news import SOURCE_STOCK_NEWS_EM, SUPPORTED_NEWS_SOURCES
+from fin_agent.watchlist import GROUPS as WATCHLIST_GROUPS
 
 
 logger = logging.getLogger(__name__)
 
 
-SUBSCRIPTION_TYPES = ("sector", "topic", "portfolio")
-# sector/topic 缺少个股上下文，stock_news_em 仅适用于 portfolio；与
+SUBSCRIPTION_TYPES = ("sector", "topic", "portfolio", "watchlist")
+LIVE_SYMBOL_TYPES = ("portfolio", "watchlist")
+LIVE_SUBSCRIPTION_DEFAULT_NAMES = {
+    "portfolio": "持仓新闻",
+    "watchlist": "自选新闻",
+}
+# sector/topic 缺少个股上下文，stock_news_em 仅适用于 portfolio/watchlist；与
 # fin_agent.tools.news_tools._normalize_sources_for_type 保持一致的类型约束，
 # 确保无论走 Agent 工具还是 HTTP API 都无法写入不适用该类型的来源。
 _GLOBAL_ONLY_SOURCES = tuple(s for s in SUPPORTED_NEWS_SOURCES if s != SOURCE_STOCK_NEWS_EM)
 
 
 def _allowed_sources_for_type(subscription_type):
-    if subscription_type == "portfolio":
+    if subscription_type in LIVE_SYMBOL_TYPES:
         return SUPPORTED_NEWS_SOURCES
     return _GLOBAL_ONLY_SOURCES
 
@@ -147,13 +153,38 @@ def _symbol_list(values):
     return sorted(set(symbols))
 
 
+def _group_list(values):
+    """规范化 watchlist 分组；None 表示跟随全部 GROUPS。至少一组。"""
+    if values is None:
+        return list(WATCHLIST_GROUPS)
+    if isinstance(values, str):
+        values = [values]
+    if not isinstance(values, (list, tuple)):
+        raise ValueError("groups 必须是数组")
+    selected = []
+    seen = set()
+    for raw in values:
+        group = str(raw or "").strip()
+        if not group:
+            continue
+        if group not in WATCHLIST_GROUPS:
+            raise ValueError("groups 只能包含 candidate 或 track")
+        if group not in seen:
+            seen.add(group)
+            selected.append(group)
+    if not selected:
+        raise ValueError("至少选择一个自选分组")
+    return [group for group in WATCHLIST_GROUPS if group in seen]
+
+
 def _is_string_list(value):
     return isinstance(value, list) and all(isinstance(v, str) for v in value)
 
 
 def _valid_subscription_item(item):
     """订阅深校验：核心字段自建库起就一直存在，缺失即视为损坏；`symbols`
-    是 portfolio 类型天然没有的字段，缺失属于正常情况，不参与校验。"""
+    是 portfolio/watchlist 类型天然没有的字段，`groups` 仅 watchlist 使用，
+    缺失属于正常情况，不参与校验。"""
     if not isinstance(item, dict):
         return False
     if not isinstance(item.get("id"), str) or not item["id"]:
@@ -175,6 +206,9 @@ def _valid_subscription_item(item):
         return False
     symbols = item.get("symbols")
     if symbols is not None and not _is_string_list(symbols):
+        return False
+    groups = item.get("groups")
+    if groups is not None and not _is_string_list(groups):
         return False
     return True
 
@@ -322,16 +356,22 @@ class NewsSubscriptionStore:
         sources=None,
         enabled=True,
         symbols=None,
+        groups=None,
     ):
         if subscription_type not in SUBSCRIPTION_TYPES:
             raise ValueError(f"不支持的订阅类型：{subscription_type}")
-        if subscription_type == "portfolio" and symbols is not None:
-            raise ValueError("portfolio 订阅不支持 symbols 字段")
+        if subscription_type in LIVE_SYMBOL_TYPES and symbols is not None:
+            raise ValueError(f"{subscription_type} 订阅不支持 symbols 字段")
+        if subscription_type != "watchlist" and groups is not None:
+            raise ValueError("只有 watchlist 订阅支持 groups 字段")
         now = _now()
+        display_name = LIVE_SUBSCRIPTION_DEFAULT_NAMES.get(subscription_type)
+        if not display_name:
+            display_name = str(name or "").strip() or subscription_type
         item = {
             "id": str(uuid.uuid4()),
             "type": subscription_type,
-            "name": str(name or "").strip() or subscription_type,
+            "name": display_name,
             "enabled": bool(enabled),
             "keywords": _string_list(keywords),
             "exclude_keywords": _string_list(exclude_keywords),
@@ -339,7 +379,9 @@ class NewsSubscriptionStore:
             "created_at": now,
             "updated_at": now,
         }
-        if subscription_type != "portfolio":
+        if subscription_type == "watchlist":
+            item["groups"] = _group_list(groups)
+        elif subscription_type != "portfolio":
             item["symbols"] = _symbol_list(symbols)
         with _SUBSCRIPTION_LOCK:
             data = self._load()
@@ -350,6 +392,7 @@ class NewsSubscriptionStore:
     def update_subscription(self, subscription_id, **changes):
         allowed = {
             "name", "enabled", "keywords", "exclude_keywords", "sources", "symbols",
+            "groups",
         }
         unknown = set(changes) - allowed
         if unknown:
@@ -363,7 +406,10 @@ class NewsSubscriptionStore:
             if target is None:
                 return None
             if "name" in changes:
-                target["name"] = str(changes["name"] or "").strip() or target["type"]
+                default_name = LIVE_SUBSCRIPTION_DEFAULT_NAMES.get(target.get("type"))
+                target["name"] = default_name or (
+                    str(changes["name"] or "").strip() or target["type"]
+                )
             if "enabled" in changes:
                 target["enabled"] = bool(changes["enabled"])
             for key in ("keywords", "exclude_keywords"):
@@ -373,10 +419,14 @@ class NewsSubscriptionStore:
                 target["sources"] = self._normalize_sources(
                     changes["sources"], target.get("type")
                 )
-            if "symbols" in changes and target.get("type") == "portfolio":
-                raise ValueError("portfolio 订阅不支持 symbols 字段")
+            if "symbols" in changes and target.get("type") in LIVE_SYMBOL_TYPES:
+                raise ValueError(f"{target.get('type')} 订阅不支持 symbols 字段")
             if "symbols" in changes:
                 target["symbols"] = _symbol_list(changes["symbols"])
+            if "groups" in changes:
+                if target.get("type") != "watchlist":
+                    raise ValueError("只有 watchlist 订阅支持 groups 字段")
+                target["groups"] = _group_list(changes["groups"])
             target["updated_at"] = _now()
             self._save(data)
             return dict(target)

@@ -138,17 +138,17 @@ const ProfileView: React.FC = () => {
 
   return (
     <SubPageShell>
-      <div className="fa-titlebar flex shrink-0 items-center gap-3 px-4">
+      <div className="fa-page-header">
         <button
           type="button"
-          onClick={() => navigate('/chat')}
-          className="fa-icon-btn"
+          onClick={() => navigate(-1)}
+          className="cursor-pointer rounded-lg p-2 text-[var(--fa-muted)] transition-colors duration-200 hover:bg-[var(--fa-surface-hover)] hover:text-[var(--fa-text)]"
           title="返回"
           aria-label="返回"
         >
           <ArrowLeft size={18} />
         </button>
-        <div className="text-sm font-semibold">投资画像</div>
+        <h1 className="text-sm font-semibold">投资画像</h1>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">

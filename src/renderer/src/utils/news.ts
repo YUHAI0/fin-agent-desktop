@@ -9,7 +9,8 @@ export const NEWS_SOURCE_LABELS: Record<NewsSource, string> = {
 export const NEWS_TYPE_LABELS: Record<NewsSubscriptionType, string> = {
   sector: '板块',
   topic: '主题',
-  portfolio: '组合'
+  portfolio: '组合',
+  watchlist: '自选'
 }
 
 export const NEWS_SENTIMENT_LABELS: Record<NewsSentiment, string> = {
@@ -27,20 +28,50 @@ export function sentimentBadgeClass(sentiment: NewsSentiment): string {
 /** sector / topic 订阅只允许全局资讯源，避免误配需要个股上下文的 stock_news_em */
 export const SECTOR_TOPIC_SOURCES: NewsSource[] = ['stock_info_global_cls', 'stock_info_global_em']
 
-/** portfolio 订阅额外允许个股新闻，用于覆盖持仓相关的公司公告与新闻 */
+/** portfolio / watchlist 订阅额外允许个股新闻，用于覆盖公司相关快讯与公告 */
 export const PORTFOLIO_SOURCES: NewsSource[] = [
   'stock_info_global_cls',
   'stock_info_global_em',
   'stock_news_em'
 ]
 
+export const WATCHLIST_GROUP_LABELS: Record<WatchlistGroup, string> = {
+  candidate: '候选买入',
+  track: '长期跟踪'
+}
+
+export const WATCHLIST_GROUP_OPTIONS: { value: WatchlistGroup; label: string }[] = [
+  { value: 'candidate', label: '候选买入' },
+  { value: 'track', label: '长期跟踪' }
+]
+
+export function isLiveSymbolType(type: NewsSubscriptionType): boolean {
+  return type === 'portfolio' || type === 'watchlist'
+}
+
+export const LIVE_SUBSCRIPTION_DEFAULT_NAMES: Record<'portfolio' | 'watchlist', string> = {
+  portfolio: '持仓新闻',
+  watchlist: '自选新闻'
+}
+
+export function defaultLiveSubscriptionName(type: NewsSubscriptionType): string | null {
+  if (type === 'portfolio' || type === 'watchlist') return LIVE_SUBSCRIPTION_DEFAULT_NAMES[type]
+  return null
+}
+
+export function formatWatchlistGroups(groups: WatchlistGroup[] | undefined): string {
+  const selected = (groups && groups.length > 0 ? groups : (['candidate', 'track'] as WatchlistGroup[]))
+    .filter((group, index, list) => list.indexOf(group) === index)
+  return selected.map((group) => WATCHLIST_GROUP_LABELS[group] || group).join('、')
+}
+
 export function sourceOptionsForType(type: NewsSubscriptionType): { value: NewsSource; label: string }[] {
-  const list = type === 'portfolio' ? PORTFOLIO_SOURCES : SECTOR_TOPIC_SOURCES
+  const list = isLiveSymbolType(type) ? PORTFOLIO_SOURCES : SECTOR_TOPIC_SOURCES
   return list.map((value) => ({ value, label: NEWS_SOURCE_LABELS[value] }))
 }
 
 export function defaultSourcesForType(type: NewsSubscriptionType): NewsSource[] {
-  return type === 'portfolio' ? [...PORTFOLIO_SOURCES] : [...SECTOR_TOPIC_SOURCES]
+  return isLiveSymbolType(type) ? [...PORTFOLIO_SOURCES] : [...SECTOR_TOPIC_SOURCES]
 }
 
 /**

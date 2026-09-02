@@ -3,12 +3,26 @@ import { normalizeNewsUrl } from './news'
 
 export function buildAnalyzeStockPrefill(tsCode: string, name?: string): string {
   const label = name ? `${name}（${tsCode}）` : tsCode
-  return `请按「结论 → 依据 → 风险 → 下一步」结构，对 ${label} 做个股体检分析。`
+  return (
+    `请按「结论 → 依据 → 风险 → 下一步」结构，对 ${label} 做个股体检分析。` +
+    `这是个股体检，回复末尾必须附 FIN_AGENT_REPORT_JSON，kind=stock_checkup。`
+  )
 }
 
 export function buildPortfolioDiagnosePrefill(portfolioId: string, portfolioName?: string): string {
   const label = portfolioName ? `「${portfolioName}」` : ''
-  return `请诊断当前组合${label}（id=${portfolioId}）：按结论→依据→风险→下一步给出健康度与调仓建议；先调用持仓工具获取真实数据。`
+  return (
+    `请诊断当前组合${label}（id=${portfolioId}）：按结论→依据→风险→下一步给出健康度与调仓建议；先调用持仓工具获取真实数据。` +
+    `这是组合诊断，回复末尾必须附 FIN_AGENT_REPORT_JSON，kind=portfolio_diagnose。`
+  )
+}
+
+export function buildTradeMemoPrefill(tsCode: string, name?: string): string {
+  const label = name ? `${name}（${tsCode}）` : tsCode
+  return (
+    `请就 ${label} 写一份买卖决策备忘录：看多或看空理由、关键支撑/压力位、建议仓位与止损参考。` +
+    `按结论→依据→风险→下一步回答。这是买卖备忘录，回复末尾必须附 FIN_AGENT_REPORT_JSON，kind=trade_memo。`
+  )
 }
 
 export function buildWatchTodayPrefill(input: {

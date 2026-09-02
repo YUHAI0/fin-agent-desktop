@@ -6,6 +6,7 @@ import ConfigView from './components/ConfigView'
 import ProfileView from './components/ProfileView'
 import AboutView from './components/AboutView'
 import PortfolioView from './components/PortfolioView'
+import FavoritesView from './components/FavoritesView'
 import NewsView from './components/NewsView'
 import StockDetailView from './components/StockDetailView'
 import ToastView from './components/ToastView'
@@ -70,6 +71,7 @@ function App(): JSX.Element {
         <Route path="/profile" element={<ProfileView />} />
         <Route path="/about" element={<AboutView />} />
         <Route path="/portfolio" element={<PortfolioView />} />
+        <Route path="/reports" element={<FavoritesView />} />
         <Route path="/news" element={<NewsView />} />
         <Route path="/stock/:tsCode" element={<StockDetailView />} />
         <Route path="/toast" element={<ToastView />} />

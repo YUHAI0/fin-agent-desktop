@@ -569,7 +569,7 @@ function focusChatWindow(): boolean {
 
 function handleNotificationActivation(notif: DesktopNotificationPayload): void {
   if (!focusChatWindow() || !chatWindow) return
-  if (notif.type === 'price_alert') {
+  if (notif.type === 'price_alert' || notif.type === 'watchlist_move') {
     const tsCode = (notif.ts_code || '').trim()
     if (tsCode) {
       chatWindow.webContents.send(
@@ -2630,6 +2630,40 @@ app.whenReady().then(() => {
 
   ipcMain.handle('generate-dashboard-comment', async (_e, payload: unknown) =>
     makeApiRequest('/dashboard/comment', 'POST', payload)
+  )
+
+  ipcMain.handle('list-analysis-favorites', async () =>
+    makeApiRequest('/reports/favorites')
+  )
+
+  ipcMain.handle('list-watchlist', async () => makeApiRequest('/watchlist'))
+
+  ipcMain.handle('get-watchlist-status', async (_e, tsCode: string) =>
+    makeApiRequest(`/watchlist/status?ts_code=${encodeURIComponent(tsCode)}`)
+  )
+
+  ipcMain.handle('add-watchlist', async (_e, payload: unknown) =>
+    makeApiRequest('/watchlist/add', 'POST', payload)
+  )
+
+  ipcMain.handle('set-watchlist-group', async (_e, payload: unknown) =>
+    makeApiRequest('/watchlist/group', 'POST', payload)
+  )
+
+  ipcMain.handle('set-watchlist-alert-pct', async (_e, payload: unknown) =>
+    makeApiRequest('/watchlist/alert-pct', 'POST', payload)
+  )
+
+  ipcMain.handle('remove-watchlist', async (_e, id: string) =>
+    makeApiRequest('/watchlist/remove', 'POST', { id })
+  )
+
+  ipcMain.handle('save-analysis-favorite', async (_e, payload: unknown) =>
+    makeApiRequest('/reports/favorites', 'POST', payload)
+  )
+
+  ipcMain.handle('delete-analysis-favorite', async (_e, id: string) =>
+    makeApiRequest('/reports/favorites', 'DELETE', { id })
   )
 
   ipcMain.handle('get-portfolio-detail', async (_e, id?: string) =>

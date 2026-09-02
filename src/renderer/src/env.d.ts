@@ -158,6 +158,54 @@ interface DashboardSummary {
   error?: string
 }
 
+type AnalysisReportKind = 'stock_checkup' | 'portfolio_diagnose' | 'trade_memo'
+type AnalysisReportDepth = 'brief' | 'standard' | 'full'
+
+interface AnalysisReportSections {
+  conclusion: string
+  evidence: string
+  risk: string
+  next: string
+}
+
+interface AnalysisReportPayload {
+  kind: AnalysisReportKind
+  title: string
+  depth: AnalysisReportDepth
+  symbols: string[]
+  portfolio_id?: string | null
+  sections: AnalysisReportSections
+  disclaimer: string
+  favorite_id?: string
+}
+
+interface AnalysisFavoriteItem {
+  id: string
+  created_at: number
+  kind: AnalysisReportKind
+  title: string
+  depth: AnalysisReportDepth
+  symbols: string[]
+  portfolio_id?: string | null
+  sections: AnalysisReportSections
+  disclaimer: string
+  source_session_id?: string | null
+}
+
+type WatchlistGroup = 'candidate' | 'track'
+
+interface WatchlistItem {
+  id: string
+  ts_code: string
+  name: string
+  group: WatchlistGroup
+  alert_pct: number
+  alert_task_id?: string
+  created_at: number
+  price?: number | null
+  pct_chg?: number | null
+}
+
 interface AlertHistoryItem {
   id: string
   task_id?: string
@@ -272,7 +320,7 @@ interface StockMoneyflowRow {
   [key: string]: unknown
 }
 
-type NewsSubscriptionType = 'sector' | 'topic' | 'portfolio'
+type NewsSubscriptionType = 'sector' | 'topic' | 'portfolio' | 'watchlist'
 type NewsSource = 'stock_news_em' | 'stock_info_global_cls' | 'stock_info_global_em'
 
 interface NewsSubscription {
@@ -284,6 +332,7 @@ interface NewsSubscription {
   exclude_keywords: string[]
   sources: NewsSource[]
   symbols?: string[]
+  groups?: WatchlistGroup[]
   created_at: string
   updated_at: string
 }
@@ -296,6 +345,7 @@ interface NewsSubscriptionInput {
   exclude_keywords?: string[]
   sources?: NewsSource[]
   symbols?: string[]
+  groups?: WatchlistGroup[]
 }
 
 type NewsSubscriptionUpdate = Partial<Omit<NewsSubscriptionInput, 'type'>>
@@ -523,6 +573,28 @@ declare interface Window {
       index?: { name?: string; change_pct?: number | null }
       news_titles?: string[]
     }) => Promise<{ ok: boolean; comment?: string; error?: string }>
+    listAnalysisFavorites: () => Promise<{ ok: boolean; items?: AnalysisFavoriteItem[]; error?: string }>
+    listWatchlist: () => Promise<{ ok: boolean; items?: WatchlistItem[]; error?: string }>
+    getWatchlistStatus: (
+      tsCode: string
+    ) => Promise<{ ok: boolean; held?: boolean; item?: WatchlistItem | null; error?: string }>
+    addWatchlist: (payload: {
+      ts_code: string
+      group: WatchlistGroup
+      name?: string
+    }) => Promise<{ ok: boolean; item?: WatchlistItem; error?: string }>
+    setWatchlistGroup: (payload: {
+      id: string
+      group: WatchlistGroup
+    }) => Promise<{ ok: boolean; item?: WatchlistItem; error?: string }>
+    setWatchlistAlertPct: (payload: {
+      id: string
+      pct: number
+    }) => Promise<{ ok: boolean; item?: WatchlistItem; error?: string }>
+    removeWatchlist: (id: string) => Promise<{ ok: boolean; error?: string }>
+    saveAnalysisFavorite: (payload: AnalysisReportPayload & { source_session_id?: string }) =>
+      Promise<{ ok: boolean; id?: string; error?: string }>
+    deleteAnalysisFavorite: (id: string) => Promise<{ ok: boolean; error?: string }>
     getPortfolioDetail: (id?: string) => Promise<PortfolioDetail>
     createPortfolio: (name: string) => Promise<{ success: boolean; id?: string; error?: string }>
     renamePortfolio: (id: string, name: string) => Promise<{ success: boolean; error?: string }>

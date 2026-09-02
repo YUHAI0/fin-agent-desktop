@@ -8,7 +8,7 @@ import uuid
 from pathlib import Path
 from fin_agent.config import Config
 from fin_agent.notification import NotificationManager
-from fin_agent.alert_copy import format_alert, format_condition_label
+from fin_agent.alert_copy import format_alert, format_condition_label, format_watchlist_move
 from fin_agent.alert_history import AlertHistoryStore
 
 
@@ -150,6 +150,42 @@ class TaskScheduler:
         self.save_tasks()
         return task_id
 
+    def add_watchlist_move(self, ts_code, pct, watchlist_item_id):
+        self.load_tasks()
+        try:
+            pct_n = int(pct)
+        except (TypeError, ValueError):
+            pct_n = 5
+        task_id = f"watchlist_move_{ts_code}_{uuid.uuid4().hex[:8]}"
+        task = {
+            "id": task_id,
+            "type": "watchlist_move",
+            "ts_code": ts_code,
+            "pct": pct_n,
+            "watchlist_item_id": str(watchlist_item_id or ""),
+            "email": Config.EMAIL_RECEIVER or Config.EMAIL_SENDER,
+            "enabled": True,
+            "created_at": time.time(),
+            "last_fired_date": None,
+        }
+        self.tasks[task_id] = task
+        self.save_tasks()
+        return task_id
+
+    def update_watchlist_move_pct(self, task_id, pct) -> bool:
+        self.load_tasks()
+        if task_id not in self.tasks:
+            return False
+        task = self.tasks[task_id]
+        if task.get("type") != "watchlist_move":
+            return False
+        try:
+            task["pct"] = int(pct)
+        except (TypeError, ValueError):
+            return False
+        self.save_tasks()
+        return True
+
     def update_price_alert(self, task_id, ts_code=None, operator=None, threshold=None):
         self.load_tasks()
         if task_id not in self.tasks:
@@ -176,7 +212,7 @@ class TaskScheduler:
 
     def list_tasks_enriched(self):
         """列表附带股票名称与现价涨跌，供前端提醒弹窗展示（不写回 tasks.json）。"""
-        tasks = [dict(t) for t in self.list_tasks()]
+        tasks = [dict(t) for t in self.list_tasks() if t.get("type") != "watchlist_move"]
         for t in tasks:
             if t.get("type") == "price_alert":
                 t["condition_label"] = format_condition_label(t)
@@ -268,6 +304,8 @@ class TaskScheduler:
                 
             if task['type'] == 'price_alert':
                 self._check_price_alert(task)
+            elif task['type'] == 'watchlist_move':
+                self._check_watchlist_move(task)
 
     def _check_price_alert(self, task):
         from fin_agent.datasources import get_provider
@@ -439,6 +477,103 @@ class TaskScheduler:
                      logger.error(f"Error checking task {task['id']}: {msg}")
             else:
                 logger.error(f"Error checking task {task['id']}: {e}")
+
+    def _check_watchlist_move(self, task):
+        from fin_agent.datasources import get_provider
+
+        try:
+            ts_code = task.get("ts_code")
+            if not ts_code:
+                return
+            today = datetime.datetime.now().strftime("%Y%m%d")
+            if str(task.get("last_fired_date") or "") == today:
+                return
+
+            try:
+                threshold_pct = float(task.get("pct") or 0)
+            except (TypeError, ValueError):
+                return
+            if threshold_pct <= 0:
+                return
+
+            df = get_provider().get_realtime_price(ts_code)
+            if df is None or df.empty:
+                logger.warning(f"No data for {ts_code}")
+                return
+            record = df.iloc[0].to_dict()
+            current_price = float(record.get("price") or 0)
+            pre_close = float(record.get("pre_close") or 0)
+            if current_price <= 0 or pre_close <= 0:
+                return
+
+            try:
+                pct_chg = float(record.get("pct_chg"))
+            except (TypeError, ValueError):
+                pct_chg = (current_price - pre_close) / pre_close * 100
+            if abs(pct_chg) < threshold_pct:
+                return
+
+            stock_name = record.get("name") or ts_code
+            copy = format_watchlist_move(
+                task, stock_name=stock_name, current_price=current_price, pct_chg=pct_chg
+            )
+            subject = f"[Fin-Agent] {copy.title}"
+            content = (
+                f"自选异动通知\n"
+                f"================================\n"
+                f"{copy.message}\n"
+                f"现价: {current_price:.2f}\n"
+                f"触发时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+                f"================================\n"
+                f"此邮件由 Fin-Agent 自动发送。"
+            )
+
+            print(f"\n[Scheduler] Triggering task {task['id']}: {subject}")
+
+            try:
+                AlertHistoryStore().append({
+                    "task_id": task["id"],
+                    "ts_code": ts_code,
+                    "stock_name": stock_name,
+                    "operator": "pct_chg",
+                    "threshold": threshold_pct,
+                    "price": current_price,
+                    "message": copy.message,
+                    "condition_label": copy.condition_label,
+                })
+            except Exception as hist_err:
+                logger.error(
+                    f"Failed to append alert history for {task['id']}: {hist_err}"
+                )
+
+            try:
+                self.notification_sink({
+                    "notification_id": f"watchlist_move_{task['id']}_{int(time.time())}",
+                    "type": "watchlist_move",
+                    "title": copy.title,
+                    "body": copy.body,
+                    "task_id": task["id"],
+                    "ts_code": ts_code,
+                    "timestamp": time.time(),
+                })
+            except Exception as notify_err:
+                logger.error(
+                    f"Failed to enqueue desktop notification for {task['id']}: {notify_err}"
+                )
+
+            email = task.get("email")
+            if Config.is_email_configured():
+                success = NotificationManager.send_email(subject, content, email)
+                if success:
+                    print(f"[Scheduler] Email sent to {email}")
+                else:
+                    print(f"[Scheduler] Failed to send email to {email}")
+
+            task["last_fired_date"] = today
+            self.save_tasks()
+            print(f"[Scheduler] watchlist_move {task['id']} marked fired for {today}")
+        except Exception as e:
+            logger.error(f"Error checking watchlist_move {task.get('id')}: {e}")
 
     def run_scheduler(self, cycle=None):
         """轮询循环。间隔与交易时段开关每轮从配置读取，改动下一周期即生效。"""

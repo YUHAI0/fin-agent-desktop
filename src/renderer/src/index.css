@@ -719,7 +719,7 @@ html[data-window-backdrop]:not([data-window-backdrop='none']) #root {
   }
 
   .fa-dashboard-welcome {
-    @apply min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-8;
+    @apply flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-6 md:px-8;
   }
 
   .fa-dashboard-welcome-inner {
@@ -1159,6 +1159,51 @@ html[data-window-backdrop]:not([data-window-backdrop='none']) #root {
 
   .fa-news-item--link .fa-news-item-action-icon {
     color: var(--fa-accent);
+  }
+
+  .fa-report-card {
+    @apply w-full rounded-2xl border px-4 py-4 text-left;
+    border-color: var(--fa-border);
+    background: var(--fa-surface);
+  }
+
+  .fa-report-kind {
+    @apply inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[10px] font-medium;
+    color: var(--fa-accent);
+    background: var(--fa-accent-soft);
+  }
+
+  .fa-report-depth {
+    @apply inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[10px];
+    color: var(--fa-muted);
+    border: 1px solid var(--fa-border-subtle);
+  }
+
+  .fa-favorites-body {
+    @apply flex min-h-0 flex-1 overflow-hidden;
+  }
+
+  .fa-favorites-list {
+    @apply flex w-[280px] shrink-0 flex-col gap-1 overflow-y-auto border-r p-2;
+    border-color: var(--fa-border-subtle);
+  }
+
+  .fa-favorites-item {
+    @apply w-full cursor-pointer rounded-xl px-3 py-2.5 text-left transition-colors duration-200;
+    color: var(--fa-text);
+  }
+
+  .fa-favorites-item:hover {
+    background: var(--fa-surface-hover);
+  }
+
+  .fa-favorites-item-active {
+    background: var(--fa-surface);
+    box-shadow: inset 0 0 0 1px var(--fa-border);
+  }
+
+  .fa-favorites-detail {
+    @apply min-h-0 min-w-0 flex-1 overflow-y-auto px-6 py-5;
   }
 
   .fa-news-chat-card {

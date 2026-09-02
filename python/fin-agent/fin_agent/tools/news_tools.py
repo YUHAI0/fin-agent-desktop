@@ -9,6 +9,8 @@ from fin_agent.news import (
 from fin_agent.news_monitor import get_news_monitor, start_news_monitor
 from fin_agent.news_query import query_news_live
 from fin_agent.news_store import (
+    LIVE_SYMBOL_TYPES,
+    LIVE_SUBSCRIPTION_DEFAULT_NAMES,
     SUBSCRIPTION_TYPES,
     NewsSubscriptionStore,
     NotifiedNewsStore,
@@ -63,12 +65,12 @@ def _limit(value, maximum=50):
 def _subscription_type(value):
     value = str(value or "").strip().casefold()
     if value not in SUBSCRIPTION_TYPES:
-        raise ValueError("type 必须是 sector、topic 或 portfolio")
+        raise ValueError("type 必须是 sector、topic、portfolio 或 watchlist")
     return value
 
 
 def _default_sources(subscription_type):
-    if subscription_type == "portfolio":
+    if subscription_type in LIVE_SYMBOL_TYPES:
         return list(SUPPORTED_NEWS_SOURCES)
     return list(_GLOBAL_NEWS_SOURCES)
 
@@ -99,7 +101,7 @@ def _normalize_sources_for_type(subscription_type, sources):
             raise ValueError(
                 "sector/topic 仅支持全局快讯源："
                 f"{', '.join(_GLOBAL_NEWS_SOURCES)}；"
-                "stock_news_em 只适用于 portfolio"
+                "stock_news_em 只适用于 portfolio 或 watchlist"
             )
     return values
 
@@ -170,8 +172,9 @@ def create_news_subscription(
     keywords=None,
     exclude_keywords=None,
     sources=None,
+    groups=None,
 ):
-    """创建板块、主题或动态持仓新闻订阅。"""
+    """创建板块、主题、动态持仓或自选新闻订阅。"""
     try:
         subscription_type = _subscription_type(type)
         normalized_name = str(name or "").strip()
@@ -180,8 +183,10 @@ def create_news_subscription(
                 raise ValueError("sector/topic 订阅至少需要 name 或 keywords")
             if not keywords:
                 keywords = [normalized_name]
-        elif not normalized_name:
-            normalized_name = "全部持仓新闻"
+        elif subscription_type == "watchlist":
+            normalized_name = LIVE_SUBSCRIPTION_DEFAULT_NAMES["watchlist"]
+        elif subscription_type == "portfolio":
+            normalized_name = LIVE_SUBSCRIPTION_DEFAULT_NAMES["portfolio"]
 
         item = NewsSubscriptionStore().create_subscription(
             subscription_type=subscription_type,
@@ -189,10 +194,13 @@ def create_news_subscription(
             keywords=keywords,
             exclude_keywords=exclude_keywords,
             sources=_normalize_sources_for_type(subscription_type, sources),
+            groups=groups,
         )
         message = "新闻订阅已创建"
         if subscription_type == "portfolio":
             message += "；该订阅会动态跟随全部组合中的持仓"
+        elif subscription_type == "watchlist":
+            message += "；该订阅会动态跟随所选分组的自选股"
         return _result(item, message)
     except (TypeError, ValueError, OSError) as exc:
         return _error(f"创建新闻订阅失败：{exc}")
@@ -222,6 +230,7 @@ def update_news_subscription(
     exclude_keywords=_UNSET,
     sources=_UNSET,
     enabled=_UNSET,
+    groups=_UNSET,
 ):
     """更新新闻订阅的可编辑字段。"""
     try:
@@ -235,6 +244,7 @@ def update_news_subscription(
             ("name", name),
             ("keywords", keywords),
             ("exclude_keywords", exclude_keywords),
+            ("groups", groups),
         ):
             if value is not _UNSET:
                 changes[key] = value
@@ -326,14 +336,14 @@ def refresh_news():
 _TYPE_PROPERTY = {
     "type": "string",
     "enum": list(SUBSCRIPTION_TYPES),
-    "description": "订阅类型：sector（板块）、topic（主题）或 portfolio（全部组合持仓）。",
+    "description": "订阅类型：sector（板块）、topic（主题）、portfolio（全部组合持仓）或 watchlist（自选）。",
 }
 _SOURCES_PROPERTY = {
     "type": "array",
     "items": {"type": "string", "enum": list(SUPPORTED_NEWS_SOURCES)},
     "description": (
         "可选新闻源。省略或传空数组均使用类型默认值：sector/topic 仅使用"
-        " stock_info_global_cls、stock_info_global_em；portfolio 默认使用全部三源。"
+        " stock_info_global_cls、stock_info_global_em；portfolio/watchlist 默认使用全部三源。"
     ),
 }
 _KEYWORDS_PROPERTY = {
@@ -457,7 +467,8 @@ NEWS_TOOLS_SCHEMA = [
             "name": "create_news_subscription",
             "description": (
                 "创建新闻订阅。sector/topic 用 name 和 keywords 匹配；"
-                "portfolio 自动动态跟随全部组合持仓且不接受 symbols。"
+                "portfolio 自动动态跟随全部组合持仓且不接受 symbols；"
+                "watchlist 自动跟随自选，可用 groups 选择 candidate/track，省略则两组都跟，不接受 symbols。"
             ),
             "parameters": {
                 "type": "object",
@@ -470,6 +481,14 @@ NEWS_TOOLS_SCHEMA = [
                     "keywords": _KEYWORDS_PROPERTY,
                     "exclude_keywords": _EXCLUDE_KEYWORDS_PROPERTY,
                     "sources": _SOURCES_PROPERTY,
+                    "groups": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": ["candidate", "track"]},
+                        "description": (
+                            "仅 watchlist：要跟随的自选分组。"
+                            "candidate=候选买入，track=长期跟踪；省略则跟随两组。"
+                        ),
+                    },
                 },
                 "required": ["type"],
             },
@@ -509,6 +528,11 @@ NEWS_TOOLS_SCHEMA = [
                     "enabled": {
                         "type": "boolean",
                         "description": "是否启用订阅。",
+                    },
+                    "groups": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": ["candidate", "track"]},
+                        "description": "仅 watchlist：要跟随的自选分组。",
                     },
                 },
                 "required": ["subscription_id"],

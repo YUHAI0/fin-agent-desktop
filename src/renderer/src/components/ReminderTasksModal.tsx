@@ -121,7 +121,7 @@ export const ReminderTasksModal: React.FC<ReminderTasksModalProps> = ({ open, on
         setTasks([])
         setError(res.error)
       } else if (Array.isArray(res.tasks)) {
-        setTasks(res.tasks as SchedulerTask[])
+        setTasks((res.tasks as SchedulerTask[]).filter((t) => t.type !== 'watchlist_move'))
       } else {
         setTasks([])
         setError('无法加载任务列表')
