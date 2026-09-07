@@ -6,7 +6,13 @@ from types import SimpleNamespace
 from colorama import Fore, Style
 from fin_agent.config import Config
 from fin_agent.llm.factory import LLMFactory
-from fin_agent.report_parse import DISCLAIMER, ReportStreamFilter, extract_report
+from fin_agent.report_parse import (
+    DISCLAIMER,
+    REPORT_MARKER,
+    ReportStreamFilter,
+    extract_report,
+    strip_report_preamble,
+)
 from fin_agent.tools.tushare_tools import TOOLS_SCHEMA, execute_tool_call
 from fin_agent.tools.profile_tools import get_profile_manager
 from fin_agent.utils import FinMarkdown
@@ -33,6 +39,54 @@ _TOOL_RESULT_MAX_CHARS = 12_000
 _LLM_HISTORY_MAX_CHARS = 180_000
 _LLM_HISTORY_RETRY_CHARS = 60_000
 _OLD_TOOL_RESULT_CHARS = 600
+_THINK_BLOCK_RE = None
+_TRUNCATION_NOTE = (
+    "\n\n——\n回复被中断（模型输出长度上限或结构化报告未写完）。"
+    "发送「继续」即可从断点接着写完。"
+)
+
+
+def _looks_like_planning_preamble(text: str) -> bool:
+    """模型常把「需带 FIN_AGENT_REPORT_JSON」写在正文里，标记被滤掉后就停在半句。"""
+    t = (text or "").strip()
+    if not t or len(t) > 500:
+        return False
+    if t.startswith("##"):
+        return False
+    clues = (
+        "需带",
+        "我应",
+        "我将按",
+        "让我对",
+        "按画像",
+        "experience_level",
+        "depth按",
+        "符合 stock_checkup",
+        "FIN_AGENT_REPORT",
+        "结构化输出",
+        "stock_checkup intent",
+        "output needs",
+        "output needs the",
+        "新手→",
+        "我按中等",
+    )
+    return any(c in t for c in clues)
+
+
+def _strip_think_tags(text: str) -> str:
+    """去掉 <think> 块，避免思考内容再作为正文重复展示。"""
+    if not text:
+        return text
+    global _THINK_BLOCK_RE
+    if _THINK_BLOCK_RE is None:
+        import re
+        _THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+    text = _THINK_BLOCK_RE.sub("", text)
+    lowered = text.lower()
+    idx = lowered.find("<think>")
+    if idx != -1:
+        text = text[:idx]
+    return text.strip()
 
 
 def _is_context_overflow(exc: Exception) -> bool:
@@ -351,6 +405,9 @@ class FinAgent:
             "sections.conclusion/evidence/risk/next、disclaimer。\n"
             "depth 必须按当前画像：beginner→brief，experienced→full，Unknown→standard。"
             "章节标题仍是结论/依据/风险/下一步，不要另起一套一级标题。\n"
+            "正文直接写给用户的分析，禁止在正文里自我规划、提及标记名或 JSON 字段名"
+            "（例如「我应该」「需带 FIN_AGENT_REPORT_JSON」）；思考只放在思考过程中，"
+            "写完思考后再输出完整正文与标记。\n"
             "问候、查现价、设提醒、纯工具确认、新闻闲聊禁止输出该标记。\n"
             f"disclaimer 固定为：{DISCLAIMER}\n"
             "该行之后仍可追加 FIN_AGENT_CHOICES_JSON。\n\n"
@@ -461,8 +518,14 @@ class FinAgent:
             if not text:
                 return
             visible = report_filter.feed(text)
+            entered = report_filter.take_just_entered()
+            ready = report_filter.take_ready_report()
             if visible:
                 yield {"type": "content", "content": visible}
+            if entered and not ready:
+                yield {"type": "report_pending"}
+            if ready:
+                yield {"type": "report", "report": ready}
 
         try:
             while True:
@@ -603,6 +666,19 @@ class FinAgent:
                                             
                                             break
                                     
+                                elif chunk['type'] == 'thinking':
+                                    # 原生 reasoning 字段（DeepSeek/Qwen/GLM），不进入正文过滤器
+                                    if buffer:
+                                        if thinking_state:
+                                            yield {"type": "thinking", "content": buffer}
+                                        else:
+                                            for ev in emit_content(buffer):
+                                                yield ev
+                                        buffer = ""
+                                    thought = chunk.get("content") or ""
+                                    if thought:
+                                        yield {"type": "thinking", "content": thought}
+
                                 elif chunk['type'] == 'tool_call_chunk':
                                     # If we receive a tool call chunk, it means content/thinking stream is paused or done for now.
                                     # Flush buffer immediately to show any pending thinking/content
@@ -639,9 +715,22 @@ class FinAgent:
                         if stream_interrupted:
                              # Save partial content if any
                              if full_content:
-                                 message = SimpleNamespace(role="assistant", content=full_content, tool_calls=None)
+                                 message = SimpleNamespace(
+                                     role="assistant",
+                                     content=full_content,
+                                     tool_calls=None,
+                                     finish_reason="interrupted",
+                                 )
                                  self.history.append(message)
                              return
+
+                        if message is None and full_content:
+                            message = SimpleNamespace(
+                                role="assistant",
+                                content=full_content,
+                                tool_calls=None,
+                                finish_reason="stop",
+                            )
 
                     else:
                         # Handle Normal Response (Non-stream fallback)
@@ -670,6 +759,7 @@ class FinAgent:
 
                 if not message:
                     debug_print("Message is None after loop!", file=sys.stderr)
+                    yield {"type": "error", "content": "模型没有返回完整回复，请重试。"}
                     return
 
                 context_retries = 0
@@ -678,13 +768,29 @@ class FinAgent:
                 if not message.tool_calls:
                     answer = message.content if message.content else ""
                     leftover = report_filter.flush()
+                    truncated = bool(report_filter.incomplete) or getattr(
+                        message, "finish_reason", None
+                    ) == "length"
                     if leftover:
-                        yield {"type": "content", "content": leftover}
+                        if leftover.startswith(REPORT_MARKER) or (
+                            len(leftover) >= 3 and REPORT_MARKER.startswith(leftover)
+                        ):
+                            truncated = True
+                        else:
+                            yield {"type": "content", "content": leftover}
                     cleaned, report = extract_report(answer)
+                    if report is None and report_filter.report:
+                        report = report_filter.report
+                    cleaned = _strip_think_tags(cleaned)
+                    if report:
+                        cleaned = strip_report_preamble(cleaned)
+                        truncated = False
                     self.history.append(self._to_dict(message))
                     if report:
                         yield {"type": "report", "report": report}
-                    yield {"type": "answer", "content": cleaned}
+                    yield {"type": "answer", "content": cleaned, "replace_text": True}
+                    if truncated or (not cleaned and not report):
+                        yield {"type": "content", "content": _TRUNCATION_NOTE}
                     return
 
                 # Handle tool calls

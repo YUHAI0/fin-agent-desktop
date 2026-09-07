@@ -1,6 +1,20 @@
 from openai import OpenAI
 from fin_agent.llm.base import LLMBase
 
+# 多数兼容接口默认 max_tokens=4096。个股体检在思考 + 长 JSON 报告后很容易顶满，
+# 表现为思考/正文停在半句。显式提高到 8k，失败再回退。
+_DEFAULT_MAX_TOKENS = 8192
+
+
+def _delta_reasoning(delta):
+    if delta is None:
+        return None
+    for attr in ("reasoning_content", "reasoning"):
+        value = getattr(delta, attr, None)
+        if value:
+            return value
+    return None
+
 
 def _split_concatenated_json_tool_args(arg_str: str):
     """
@@ -72,7 +86,8 @@ class OpenAICompatibleClient(LLMBase):
         params = {
             "model": self.model,
             "messages": sanitized_messages,
-            "stream": stream
+            "stream": stream,
+            "max_tokens": _DEFAULT_MAX_TOKENS,
         }
         
         if tools:
@@ -81,16 +96,35 @@ class OpenAICompatibleClient(LLMBase):
             params["tool_choice"] = tool_choice
 
         try:
-            response = self.client.chat.completions.create(**params)
+            response = self._create_completion(params)
             
             if stream:
                 return self._handle_stream(response)
             else:
-                return response.choices[0].message
+                message = response.choices[0].message
+                finish_reason = None
+                if response.choices:
+                    finish_reason = response.choices[0].finish_reason
+                try:
+                    setattr(message, "finish_reason", finish_reason)
+                except Exception:
+                    pass
+                return message
                 
         except Exception as e:
             # print(f"Error calling LLM API: {e}") # Let caller handle logging
             raise e
+
+    def _create_completion(self, params):
+        try:
+            return self.client.chat.completions.create(**params)
+        except Exception as e:
+            text = str(e).casefold()
+            if "max_tokens" in params and "max_tokens" in text:
+                params = dict(params)
+                params.pop("max_tokens", None)
+                return self.client.chat.completions.create(**params)
+            raise
             
     def _handle_stream(self, response_stream):
         """
@@ -103,10 +137,11 @@ class OpenAICompatibleClient(LLMBase):
         
         # Simulated Message Object structure to match OpenAI's object for compatibility
         class Message:
-            def __init__(self, role, content, tool_calls=None):
+            def __init__(self, role, content, tool_calls=None, finish_reason=None):
                 self.role = role
                 self.content = content
                 self.tool_calls = tool_calls
+                self.finish_reason = finish_reason
             
             def model_dump(self):
                 return {
@@ -144,28 +179,32 @@ class OpenAICompatibleClient(LLMBase):
 
         try:
             chunk_count = 0
+            finish_reason = None
             for chunk in response_stream:
                 chunk_count += 1
                 if not chunk.choices:
                     continue
-                    
-                delta = chunk.choices[0].delta
+
+                choice = chunk.choices[0]
+                if choice.finish_reason:
+                    finish_reason = choice.finish_reason
+                delta = choice.delta
+                if delta is None:
+                    continue
                 
-                # Debug: log what we receive
-                has_content = hasattr(delta, 'content') and delta.content
-                has_tool_calls = hasattr(delta, 'tool_calls') and delta.tool_calls
-                # if chunk_count <= 3 or has_content or has_tool_calls:
-                #     from fin_agent.utils import debug_print
-                #     debug_print(f"[Stream] Chunk #{chunk_count}: has_content={has_content}, has_tool_calls={has_tool_calls}", file=sys.stderr)
-                
+                # Handle native reasoning (DeepSeek/Qwen/GLM 等)
+                reasoning = _delta_reasoning(delta)
+                if reasoning:
+                    yield {"type": "thinking", "content": reasoning}
+
                 # Handle Content
-                if delta.content:
+                if getattr(delta, "content", None):
                     content_chunk = delta.content
                     collected_content.append(content_chunk)
                     yield {"type": "content", "content": content_chunk}
                 
                 # Handle Tool Calls (streaming)
-                if delta.tool_calls:
+                if getattr(delta, "tool_calls", None):
                     for tc in delta.tool_calls:
                         index = tc.index
                         
@@ -249,7 +288,8 @@ class OpenAICompatibleClient(LLMBase):
             final_message = Message(
                 role="assistant",
                 content=final_content,
-                tool_calls=final_tool_calls if final_tool_calls else None
+                tool_calls=final_tool_calls if final_tool_calls else None,
+                finish_reason=finish_reason,
             )
             
             # Yield the final message object

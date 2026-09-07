@@ -32,7 +32,7 @@ export type ChatBlock =
         matched_symbols: string[]
       }
     }
-  | {
+    | {
       type: 'report'
       kind: 'stock_checkup' | 'portfolio_diagnose' | 'trade_memo'
       title: string
@@ -47,6 +47,7 @@ export type ChatBlock =
       }
       disclaimer: string
       favorite_id?: string
+      pending?: boolean
     }
 
 export interface Message {

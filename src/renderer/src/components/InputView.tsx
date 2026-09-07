@@ -31,7 +31,9 @@ const InputView: React.FC = () => {
             data.type === 'answer' ||
             data.type === 'thinking' ||
             data.type === 'tool_call' ||
-            data.type === 'tool_call_chunk')
+            data.type === 'tool_call_chunk' ||
+            data.type === 'report' ||
+            data.type === 'report_pending')
         ) {
           return true
         }

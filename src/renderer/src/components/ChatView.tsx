@@ -190,7 +190,75 @@ const markdownComponents = {
 
 const SIDEBAR_STORAGE_KEY = 'fin-agent-sidebar'
 
-/** 当前会话是否已开始输出（思考/正文/工具），用于决定是否显示等待三点 */
+function looksLikePlanningPreamble(text: string): boolean {
+  const t = (text || '').trim()
+  if (!t || t.length > 800 || t.startsWith('##')) return false
+  return /需带|我应|我将按|让我对|按画像|experience_level|depth按|output needs|stock_checkup|FIN_AGENT_REPORT|结构化输出|新手→|但不能太简|我按中等/i.test(
+    t
+  )
+}
+
+function isIncompleteFragment(text: string): boolean {
+  const t = (text || '').trim()
+  if (!t) return false
+  if (/^\|.*\|\s*$/.test(t) || /^\s*\|?[-: ]+\|[-: |]+$/.test(t)) return false
+  if (/[。！？.!?…」』]$/.test(t)) return false
+  if (t.length <= 16) return true
+  return /提供$|需带$|needs the$|intent[,:]?$/i.test(t)
+}
+
+function trimPlanningFromAssistant(msg: Message) {
+  const blocks = msg.blocks || []
+  const lastTextIdx = blocks.reduce(
+    (found, block, index) => (block.type === 'text' ? index : found),
+    -1
+  )
+  if (lastTextIdx < 0) return
+  const block = blocks[lastTextIdx]
+  if (block.type !== 'text') return
+  const lines = block.content.split('\n')
+  while (lines.length) {
+    const last = lines[lines.length - 1] || ''
+    if (!last.trim()) {
+      lines.pop()
+      continue
+    }
+    if (isIncompleteFragment(last) || looksLikePlanningPreamble(last)) {
+      lines.pop()
+      continue
+    }
+    break
+  }
+  let next = lines.join('\n').replace(/[ \t]+$/g, '')
+  if (
+    next &&
+    looksLikePlanningPreamble(next) &&
+    !(next.includes('|') && next.includes('---'))
+  ) {
+    next = ''
+  }
+  if (!next.trim()) {
+    msg.blocks = blocks.filter((_, i) => i !== lastTextIdx)
+    if (lastTextIdx === 0 || !msg.blocks.some((b) => b.type === 'text')) {
+      msg.content = ''
+    }
+    return
+  }
+  block.content = next
+}
+
+function pendingReportBlock(): Extract<ChatBlock, { type: 'report' }> {
+  return {
+    type: 'report',
+    pending: true,
+    kind: 'stock_checkup',
+    title: '正在生成报告…',
+    depth: 'standard',
+    symbols: [],
+    sections: { conclusion: '', evidence: '', risk: '', next: '' },
+    disclaimer: ''
+  }
+}
 function assistantHasStarted(msgs: Message[]): boolean {
   const last = msgs[msgs.length - 1]
   if (!last || last.role !== 'assistant') return false
@@ -441,7 +509,9 @@ const ChatView: React.FC = () => {
           data.type === 'answer' ||
           data.type === 'thinking' ||
           data.type === 'tool_call' ||
-          data.type === 'tool_call_chunk'
+          data.type === 'tool_call_chunk' ||
+          data.type === 'report' ||
+          data.type === 'report_pending'
         ) {
           markResponding(eventSessionId, true)
         }
@@ -501,15 +571,35 @@ const ChatView: React.FC = () => {
                     assistantMsg.blocks.push({ type: 'thinking', content: data.content || '' })
                 }
             } else if (data.type === 'answer') {
-                // Some providers only return a final answer event.
-                const hasText =
-                    Boolean(assistantMsg.content?.trim()) ||
-                    assistantMsg.blocks.some(
-                        (block) => block.type === 'text' && Boolean(block.content)
-                    )
-                if (!hasText && data.content) {
-                    assistantMsg.content = data.content
-                    assistantMsg.blocks.push({ type: 'text', content: data.content })
+                const incoming = typeof data.content === 'string' ? data.content : ''
+                const reportIdx = assistantMsg.blocks.findIndex((b) => b.type === 'report')
+                const textBeforeReportIdx = assistantMsg.blocks.reduce(
+                    (found, b, i) =>
+                        b.type === 'text' && (reportIdx < 0 || i < reportIdx) ? i : found,
+                    -1
+                )
+                if (incoming) {
+                    assistantMsg.content = incoming
+                    if (
+                        textBeforeReportIdx >= 0 &&
+                        assistantMsg.blocks[textBeforeReportIdx].type === 'text'
+                    ) {
+                        assistantMsg.blocks[textBeforeReportIdx].content = incoming
+                    } else if (reportIdx >= 0) {
+                        assistantMsg.blocks.splice(reportIdx, 0, {
+                            type: 'text',
+                            content: incoming
+                        })
+                    } else {
+                        const lastBlock = getLastBlock('text')
+                        if (lastBlock && lastBlock.type === 'text') {
+                            lastBlock.content = incoming
+                        } else {
+                            assistantMsg.blocks.push({ type: 'text', content: incoming })
+                        }
+                    }
+                } else if (data.replace_text) {
+                    trimPlanningFromAssistant(assistantMsg)
                 }
             } else if (data.type === 'log') {
                 assistantMsg.logs = (assistantMsg.logs || '') + `[Log] ${data.content}\n`
@@ -727,10 +817,17 @@ const ChatView: React.FC = () => {
 
                 const resultStr = rawResult.length > 500 ? rawResult.substring(0, 500) + '...' : rawResult
                 assistantMsg.logs = (assistantMsg.logs || '') + `[Tool Result] ${resultStr}\n`
+            } else if (data.type === 'report_pending') {
+                trimPlanningFromAssistant(assistantMsg)
+                const hasReport = assistantMsg.blocks.some((b) => b.type === 'report')
+                if (!hasReport) {
+                    assistantMsg.blocks.push(pendingReportBlock())
+                }
             } else if (data.type === 'report' && data.report && typeof data.report === 'object') {
                 const r = data.report as AnalysisReportPayload
                 if (r.kind && r.title && r.sections) {
-                    assistantMsg.blocks.push({
+                    trimPlanningFromAssistant(assistantMsg)
+                    const nextReport: Extract<ChatBlock, { type: 'report' }> = {
                         type: 'report',
                         kind: r.kind,
                         title: r.title,
@@ -739,14 +836,22 @@ const ChatView: React.FC = () => {
                         portfolio_id: r.portfolio_id ?? null,
                         sections: r.sections,
                         disclaimer: r.disclaimer || '以上内容仅供参考，不构成投资建议。'
-                    })
+                    }
+                    const existingIdx = assistantMsg.blocks.findIndex((b) => b.type === 'report')
+                    if (existingIdx >= 0) {
+                        assistantMsg.blocks[existingIdx] = nextReport
+                    } else {
+                        assistantMsg.blocks.push(nextReport)
+                    }
                 }
             } else if (data.type === 'error') {
                 assistantMsg.content += `\n**Error:** ${data.content}`
                 assistantMsg.blocks.push({ type: 'text', content: `\n**Error:** ${data.content}` })
             } else if (data.type === 'finish') {
                 // 若上游只合并成一次 tool 调用，可能仍有 running 卡片：收尾避免永久转圈
-                assistantMsg.blocks = assistantMsg.blocks.map((b) =>
+                assistantMsg.blocks = assistantMsg.blocks
+                    .filter((b) => !(b.type === 'report' && b.pending))
+                    .map((b) =>
                     b.type === 'tool_execution' && b.status === 'running'
                         ? {
                               ...b,
@@ -763,7 +868,12 @@ const ChatView: React.FC = () => {
         }
 
         // tool_result / finish 需尽快反映到 UI，避免批处理或收尾时卡片仍转圈
-        if (data.type === 'tool_result' || data.type === 'finish') {
+        if (
+          data.type === 'tool_result' ||
+          data.type === 'finish' ||
+          data.type === 'report_pending' ||
+          data.type === 'report'
+        ) {
             flushSync(() => applyToSession(eventSessionId, patchFromStream))
         } else {
             applyToSession(eventSessionId, patchFromStream)
@@ -1134,6 +1244,7 @@ const ChatView: React.FC = () => {
                               key={bIdx}
                               block={block}
                               sessionId={activeSessionId}
+                              live={Boolean(isResponding && block.pending)}
                               onFavoriteId={(id) => {
                                 setMessages((prev) => {
                                   const next = [...prev]
